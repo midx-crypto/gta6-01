@@ -1,61 +1,84 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Solara Nights — config.js
+// Single source of truth for tuning, names, colours and story data.
+// Everything here is original: the city of Solara, its people and its story
+// belong to this game only and borrow nothing from any commercial title.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
-
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+export const CFG = {
+  WORLD_W: 3200,
+  WORLD_H: 2400,
+  ROAD_W: 92,
+  BLOCK: 400,
+  PLAYER_SPEED: 235,
+  PLAYER_HP: 100,
+  CAR_ACCEL: 420,
+  CAR_MAX_SPEED: 520,
+  CAR_REVERSE_MAX: 180,
+  CAR_TURN: 2.6,
+  TRAFFIC_SPEED: 150,
+  POLICE_SPEED: 560,
+  BULLET_SPEED: 900,
+  PISTOL_DAMAGE: 34,
+  PISTOL_MAG: 12,
+  WANTED_MAX: 5,
+  SAVE_KEY: 'solara-nights-save-v1',
+  // How long (seconds) the auto-save checkpoint waits between saves.
+  AUTOSAVE_SECONDS: 30,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const COLORS = {
+  grass: '#7fae5a',
+  grassDark: '#74a24f',
+  road: '#3a3f47',
+  roadEdge: '#2c3038',
+  lane: '#e8d44d',
+  sidewalk: '#b9b3a4',
+  sand: '#e8d29a',
+  water: '#2f7fb8',
+  waterDeep: '#256a9e',
+  park: '#5d9b4a',
+  buildingRoof: ['#c96f4a', '#4a7fa5', '#a55a7d', '#5a8a6a', '#b08a3e', '#7a6aa5'],
+  buildingWall: '#8a7f72',
+  carPalette: ['#d94f3d', '#3d7bd9', '#e8c33d', '#3da56a', '#e8e8e8', '#22242a', '#c77fd9', '#e88a2d'],
+  policeCar: '#1c2f4a',
+  player: '#ffd23d',
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
-};
+export const CITY_NAME = 'Kota Solara';
+export const GAME_NAME = 'Solara Nights';
+export const HERO_NAME = 'Raka';
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+// Story missions, in order. Each one is a short job for Raka in Solara.
+export const MISSIONS = [
+  {
+    id: 'm1',
+    title: 'Kenalan di Dermaga',
+    giver: 'Sari',
+    brief: 'Sari menunggumu di dermaga selatan. Jalan kaki atau naik mobil, sampai ke penanda kuning.',
+    objective: { type: 'goto', x: 1600, y: 2050, label: 'Dermaga Selatan' },
+    reward: 150,
+  },
+  {
+    id: 'm2',
+    title: 'Mobil Pesanan',
+    giver: 'Sari',
+    brief: 'Bos butuh mobil cepat. Curi mobil apa saja dengan tombol E, lalu antar ke bengkel Bayu di timur kota.',
+    objective: { type: 'deliver', x: 2850, y: 600, label: 'Bengkel Bayu', needCar: true },
+    reward: 350,
+  },
+  {
+    id: 'm3',
+    title: 'Tagihan Terakhir',
+    giver: 'Bayu',
+    brief: 'Tiga penjaga gudang menghalangi jalan. Lumpuhkan ketiganya, lalu kabur ke tempat persembunyian di barat.',
+    objective: { type: 'eliminate', count: 3, x: 350, y: 1400, label: 'Tempat Persembunyian' },
+    reward: 800,
+  },
+];
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
-
-export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
-};
-
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+export const LANDMARKS = [
+  { name: 'Dermaga Selatan', x: 1600, y: 2050 },
+  { name: 'Bengkel Bayu', x: 2850, y: 600 },
+  { name: 'Tempat Persembunyian', x: 350, y: 1400 },
+  { name: 'Taman Mentari', x: 1400, y: 1350 },
+  { name: 'Pantai Solara', x: 1600, y: 2280 },
+];
