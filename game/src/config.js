@@ -1,135 +1,77 @@
-// Aruna Bay — configuration: world size, tuning, story missions, palette.
-// Kota Aruna is an original sun-soaked coastal city. Nothing here is copied
-// from any commercial game: all names, places and characters are invented.
+// Pulau Bara — tuning numbers, palette, districts and story constants.
+// Golden-hour volcanic island: two islands joined by two bridges and a causeway.
+export const STEP = 1 / 60;
+export const SAVE_KEY = 'pulau-bara.save.v1';
 
-export const CONFIG = {
-  seed: 1,
-  cityHalf: 180, // playable city extends x,z in [-180, 180]
-  roadGap: 50, // distance between road centrelines
-  roadWidth: 12,
-  blockSize: 38,
-  beachX: 185, // sand starts here
-  waterX: 215, // sea starts here
-  playerWalkSpeed: 9,
-  playerRunSpeed: 14,
-  carMaxSpeed: 42,
-  carAccel: 26,
-  carBrake: 40,
-  carTurn: 1.9,
-  maxWanted: 5,
-  startMoney: 250,
-  startHealth: 100,
-  pistolDamage: 34,
-  pistolAmmo: 120,
-  saveKey: 'aruna-bay-save-v1',
-};
+export const WORLD = { minX: -260, maxX: 260, minZ: -420, maxZ: 220, waterY: -0.6 };
 
-// Palette for the dusk-lit coastal city: warm sand, teal sea, neon pink.
-export const PALETTE = {
-  skyTop: 0x2a3a6e,
-  skyMid: 0xff8f5e,
-  skyLow: 0xffc46b,
-  fog: 0xe8906a,
-  sea: 0x1e6f8e,
-  sand: 0xe8c98f,
-  asphalt: 0x2c2f36,
-  sidewalk: 0x8a8578,
-  grass: 0x4d8a4a,
-  building: [0xe8dcc8, 0xd8c2a0, 0xc9b8a8, 0xb8c4d0, 0xe0a878, 0x9fb8a8, 0xd8a0a0, 0xf0e0c0],
-  neon: [0xff2e88, 0x00e5ff, 0xffe14d, 0x7cff5e, 0xff6a00, 0xb46bff],
-  carPaint: [0xc22e2e, 0x2e6fc2, 0xe8c832, 0x2ec28a, 0xe8e8e8, 0x222226, 0xc26a2e, 0x7a2ec2],
-};
-
-// The seven story missions: a fixer arc for Dimas in Kota Aruna.
-export const MISSIONS = [
-  {
-    id: 1, title: 'Pesan dari Raka', giver: 'Raka',
-    brief: 'Raka, fixer lama di Kota Aruna, memanggilmu ke bengkelnya di Jalan Merpati. Datangi penanda kuning itu.',
-    reward: 500,
-    steps: [
-      { type: 'goto', label: 'Pergi ke Bengkel Raka', pos: [-75, 0, -75], radius: 8 },
-    ],
-  },
-  {
-    id: 2, title: 'Titipan Panas', giver: 'Raka',
-    brief: 'Sebuah sedan hitam membawa paket untuk Sari. Ikuti mobil itu sampai ke gudang, jangan sampai kehilangan jejaknya.',
-    reward: 800,
-    steps: [
-      { type: 'chase', label: 'Ikuti sedan hitam itu', radius: 60, loseRadius: 90, target: 'sedan' },
-      { type: 'goto', label: 'Masuk ke gudang pelabuhan', pos: [150, 0, 125], radius: 10 },
-    ],
-  },
-  {
-    id: 3, title: 'Gudang Pelabuhan', giver: 'Sari',
-    brief: 'Geng Pelabuhan menguasai gudang itu. Sari butuh gudang kembali. Habisi keempat penjaga gudang.',
-    reward: 1200,
-    steps: [
-      { type: 'kill', label: 'Habisi penjaga gudang (0/4)', pos: [150, 0, 125], count: 4, radius: 30 },
-    ],
-  },
-  {
-    id: 4, title: 'Antar Paket', giver: 'Sari',
-    brief: 'Tiga paket harus sampai sebelum matahari terbenam. Antar ke tiga titik di kota, secepat mungkin.',
-    reward: 1000,
-    steps: [
-      { type: 'goto', label: 'Antar paket 1/3: Kafe Senja', pos: [-125, 0, 75], radius: 8 },
-      { type: 'goto', label: 'Antar paket 2/3: Taman Aruna', pos: [25, 0, -125], radius: 8 },
-      { type: 'goto', label: 'Antar paket 3/3: Dermaga', pos: [195, 0, 25], radius: 8 },
-    ],
-  },
-  {
-    id: 5, title: 'Kabur dari Razia', giver: 'Raka',
-    brief: 'Razia besar-besaran di pusat kota. Polisi sudah mengincarmu. Kabur ke rumah aman di Jalan Kenanga dan hilangkan kejaran.',
-    reward: 1500,
-    steps: [
-      { type: 'escape', label: 'Kabur ke rumah aman, hilangkan polisi', pos: [-125, 0, 125], radius: 10, wanted: 3 },
-    ],
-  },
-  {
-    id: 6, title: 'Balap Pantai', giver: 'Dimas',
-    brief: 'Balapan liar di jalan pantai. Lewati kelima gerbang balap sebelum pembalap lain, buktikan siapa raja jalanan Aruna.',
-    reward: 2000,
-    steps: [
-      { type: 'race', label: 'Gerbang balap 1/5', pos: [195, 0, -125], radius: 10 },
-      { type: 'race', label: 'Gerbang balap 2/5', pos: [195, 0, -25], radius: 10 },
-      { type: 'race', label: 'Gerbang balap 3/5', pos: [195, 0, 75], radius: 10 },
-      { type: 'race', label: 'Gerbang balap 4/5', pos: [150, 0, 150], radius: 10 },
-      { type: 'race', label: 'Gerbang balap 5/5: garis finis', pos: [75, 0, 150], radius: 10 },
-    ],
-  },
-  {
-    id: 7, title: 'Perampokan Bank Aruna', giver: 'Raka',
-    brief: 'Aksi terakhir: Bank Aruna. Masuk, ambil uangnya, dan kabur ke dermaga sebelum seluruh kota mengejarmu.',
-    reward: 5000,
-    steps: [
-      { type: 'goto', label: 'Masuk ke Bank Aruna', pos: [25, 0, 25], radius: 10 },
-      { type: 'kill', label: 'Lumpuhkan pengawal bank (0/3)', pos: [25, 0, 25], count: 3, radius: 25 },
-      { type: 'grab', label: 'Ambil uang dari brankas', pos: [25, 0, 25], radius: 6, holdSeconds: 3 },
-      { type: 'escape', label: 'Kabur ke dermaga! Polisi mengejar', pos: [205, 0, -25], radius: 10, wanted: 4 },
-    ],
-  },
-];
-
-export const STORY_CAST = [
-  { name: 'Dimas', role: 'Protagonis: sopir dan fixer jalanan Kota Aruna' },
-  { name: 'Raka', role: 'Fixer tua, pemilik Bengkel Raka di Jalan Merpati' },
-  { name: 'Sari', role: 'Pemilik Kafe Senja, otak di balik banyak rencana' },
-  { name: 'Bimo', role: 'Pembalap liar jalan pantai, rival Dimas' },
-  { name: 'Kapten Laras', role: 'Kepala polisi Kota Aruna yang mengejar Dimas' },
-];
-
-// Wanted-level tuning: how many police units answer each star level.
-export const WANTED_RESPONSE = {
-  1: { policeCars: 1, footCops: 0, chaseSpeed: 24 },
-  2: { policeCars: 2, footCops: 1, chaseSpeed: 27 },
-  3: { policeCars: 3, footCops: 2, chaseSpeed: 30 },
-  4: { policeCars: 4, footCops: 3, chaseSpeed: 33 },
-  5: { policeCars: 5, footCops: 4, chaseSpeed: 36 },
-};
-
-// How fast heat cools when no crime is committed and no police can see you.
-export const HEAT_COOLDOWN_SECONDS = 25;
 export const DISTRICTS = [
-  'Pusat Kota', 'Jalan Merpati', 'Pelabuhan', 'Pantai Aruna',
-  'Taman Aruna', 'Kafe Senja', 'Dermaga', 'Jalan Kenanga',
+  { id: 'kotalama', name: 'Kota Lama', x0: -260, z0: -60, x1: -60, z1: 220, color: '#c98a4b', minH: 8, maxH: 22 },
+  { id: 'menara', name: 'Menara', x0: -60, z0: -200, x1: 140, z1: -20, color: '#4b7ac9', minH: 38, maxH: 92 },
+  { id: 'pelabuhan', name: 'Pelabuhan', x0: 140, z0: -200, x1: 260, z1: 220, color: '#8a7a4b', minH: 10, maxH: 26 },
+  { id: 'pantai', name: 'Pantai', x0: -160, z0: -420, x1: 0, z1: -240, color: '#e8c96a', minH: 6, maxH: 16 },
+  { id: 'bukit', name: 'Bukit', x0: 0, z0: -420, x1: 160, z1: -240, color: '#5a9e5a', minH: 8, maxH: 20 },
 ];
+
+export const PALETTE = {
+  sky: 0xffd9a0, sun: 0xffe9b8, fog: 0xf2c98f, sea: 0x2e7f9e,
+  ground: 0x9a8a6a, sand: 0xe8d194, road: 0x3a3a40, roadLine: 0xf2e6a0,
+  grass: 0x6a9e4a, hill: 0x7a8a4a, buildingGlass: 0x8fc4e8,
+};
+
+export const AVENUES = [-200, -120, -40, 40, 120, 200];
+export const STREETS = [-160, -80, 0, 80, 160];
+export const BRIDGES = [{ x: -120 }, { x: 120 }];
+export const CAUSEWAY = { x: 0, z0: -240, z1: -200, width: 10 };
+
+export const PLAYER = { walkSpeed: 9, runSpeed: 14, radius: 0.7, health: 100 };
+export const CAR = {
+  accel: 24, brake: 36, maxSpeed: 46, maxReverse: 12, turn: 2.0,
+  nitroBoost: 28, nitroDrain: 32, nitroRegen: 7, nitroMax: 100,
+};
+export const WANTED_DECAY_SECONDS = 9;
+export const RESPECT_RANKS = [
+  { name: 'Pemula', min: 0 },
+  { name: 'Jalanan', min: 150 },
+  { name: 'Legenda', min: 500 },
+];
+
+export const GARAGE_POS = { x: -190, z: 140 };
+export const SAFEHOUSE_POS = { x: -228, z: 188 };
+export const TAXI_STAND = { x: 20, z: -120 };
+export const RACE_START = { x: -90, z: -300 };
+export const RAMPS = [
+  { x: 90, z: -330, angle: Math.PI, name: 'Lompat Bukit' },
+  { x: -70, z: -310, angle: Math.PI / 2, name: 'Lompat Boardwalk' },
+  { x: 205, z: 60, angle: -Math.PI / 2, name: 'Lompat Kontainer' },
+];
+
+export function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+export function lerp(a, b, t) { return a + (b - a) * t; }
+export function dist2d(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
+export function angleLerp(a, b, t) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+export function districtAt(x, z) {
+  for (const d of DISTRICTS) {
+    if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) return d;
+  }
+  return null;
+}
+export function respectRank(points) {
+  let rank = RESPECT_RANKS[0];
+  for (const r of RESPECT_RANKS) if (points >= r.min) rank = r;
+  return rank;
+}
+
+// Mission tuning shared by missions.js and the HUD.
+export const MISSION_MONEY = { easy: 150, medium: 300, hard: 600, finale: 1500 };
+export const MISSION_RESPECT = { easy: 25, medium: 50, hard: 90, finale: 200 };
+export const JOB_PAY = { taxi: 80, delivery: 60 };
+export const COIN_VALUE = 25;
+export const STUNT_MONEY_PER_SECOND = 120;
+export function wantedStars(wanted) { return '★'.repeat(wanted) + '☆'.repeat(5 - wanted); }
+export function formatMoney(amount) { return '$' + Math.round(amount).toLocaleString('en-US'); }

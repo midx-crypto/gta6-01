@@ -1,231 +1,179 @@
-// Aruna Bay — missions: the seven-mission story arc. A state machine with
-// steps (goto, chase, kill, deliver, escape, race, grab) driving a 3D beacon,
-// HUD objective text and minimap blips, and paying out on completion.
+// The story: 12 missions over 3 days to the Festival Bahari. Mira, getaway
+// driver, with Pak Hendra, Lila, Doni and Komisaris Ratna. Each mission is a
+// list of steps; the engine advances them and pays out on completion.
+import { MISSION_MONEY, MISSION_RESPECT } from './config.js';
+import { spawnEnemy } from './combat.js';
+import { missionJingleSound } from './audio.js';
+import { startRace } from './races.js';
+import { startTaxiJob } from './jobs.js';
 
-import * as THREE from 'three';
-import { MISSIONS } from './config.js';
-import { spawnEnemies, clearEnemies, aliveEnemies } from './combat.js';
-import { spawnTargetCar } from './traffic.js';
-import { raiseWanted } from './police.js';
+export const MISSIONS = [
+  { id: 1, day: 1, title: 'Kenalan dengan Kota', difficulty: 'easy', briefing: 'Pak Hendra menunggumu di garasi. Datang dan kenalan dengan kru.', steps: [{ type: 'goto', x: -190, z: 140, radius: 6, text: 'Temui Pak Hendra di garasi' }] },
+  { id: 2, day: 1, title: 'Antar Paket Lila', difficulty: 'easy', briefing: 'Lila punya 3 paket untuk diantar ke seluruh kota. Jangan sampai telat.', steps: [
+    { type: 'goto', x: 20, z: -100, radius: 6, text: 'Antar paket 1/3: Balai Kota' },
+    { type: 'goto', x: -160, z: 40, radius: 6, text: 'Antar paket 2/3: Pasar Malam' },
+    { type: 'goto', x: 235, z: 100, radius: 6, text: 'Antar paket 3/3: Dermaga 7' },
+  ] },
+  { id: 3, day: 1, title: 'Balapan Pertama', difficulty: 'medium', briefing: 'Doni menantangmu balapan di Pantai. Kalahkan dia dan buktikan kamu pembalap tercepat.', steps: [{ type: 'race', x: -90, z: -300, radius: 8, text: 'Kalahkan Doni di balapan jalanan' }] },
+  { id: 4, day: 1, title: 'Maling Mobil', difficulty: 'medium', briefing: 'Kru butuh mobil cepat. Curi satu dari jalanan, lalu lolos dari polisi.', steps: [
+    { type: 'steal', x: -114, z: -120, radius: 6, text: 'Curi mobil yang terparkir' },
+    { type: 'escape', x: -228, z: 188, radius: 8, text: 'Lolos dari polisi, kembali ke safehouse' },
+  ] },
+  { id: 5, day: 2, title: 'Taksi Kilat', difficulty: 'medium', briefing: 'Tiga penumpang menunggu taksi di Menara. Antar semuanya sebelum waktu habis.', steps: [{ type: 'jobtaxi', x: 20, z: -120, radius: 8, text: 'Antar 3 penumpang taksi', time: 180 }] },
+  { id: 6, day: 2, title: 'Gudang Pelabuhan', difficulty: 'hard', briefing: 'Geng Dermaga menahan kiriman Lila. Bersihkan gudang itu.', steps: [{ type: 'kill', x: 210, z: -40, radius: 10, count: 6, text: 'Habisi 6 penjaga gudang' }] },
+  { id: 7, day: 2, title: 'Rampok Truk Uang', difficulty: 'hard', briefing: 'Truk uang festival lewat Pelabuhan. Kejar, rampok, dan kabur.', steps: [
+    { type: 'goto', x: 200, z: 40, radius: 8, text: 'Kejar truk uang di Pelabuhan' },
+    { type: 'kill', x: 200, z: 40, radius: 12, count: 4, text: 'Habisi pengawal truk' },
+    { type: 'goto', x: -228, z: 188, radius: 8, text: 'Bawa uangnya ke safehouse' },
+  ] },
+  { id: 8, day: 2, title: 'Kabur dari Razia', difficulty: 'hard', briefing: 'Komisaris Ratna menggelar razia besar. Wanted 4 — kabur dan hilangkan jejakmu.', steps: [{ type: 'escape', x: 90, z: -380, radius: 10, text: 'Kabur ke Viewpoint Bukit dan hilangkan wanted', wanted: 4 }] },
+  { id: 9, day: 3, title: 'Rencana Heist', difficulty: 'medium', briefing: 'Hari festival. Kumpulkan 3 peralatan heist: kunci brankas, jammer, dan topeng.', steps: [
+    { type: 'goto', x: -190, z: 140, radius: 6, text: 'Ambil kunci brankas di garasi' },
+    { type: 'goto', x: -100, z: -20, radius: 6, text: 'Ambil jammer dari Lila di Kafe Senja' },
+    { type: 'goto', x: -160, z: 40, radius: 6, text: 'Ambil topeng di Pasar Malam' },
+  ] },
+  { id: 10, day: 3, title: 'Masuk ke Balai Kota', difficulty: 'hard', briefing: 'Masuk ke Balai Kota lewat Plaza Menara. Polisi menjaga ketat.', steps: [
+    { type: 'kill', x: 60, z: -120, radius: 12, count: 8, text: 'Habisi 8 penjaga Plaza Menara' },
+    { type: 'goto', x: 20, z: -100, radius: 6, text: 'Masuk ke Balai Kota' },
+  ] },
+  { id: 11, day: 3, title: 'Brankas Festival', difficulty: 'hard', briefing: 'Dana festival ada di brankas Bank Bara. Bobol sebelum alarm berbunyi.', steps: [{ type: 'kill', x: 80, z: -60, radius: 12, count: 5, text: 'Habisi 5 penjaga Bank Bara', time: 150 }, { type: 'goto', x: 80, z: -60, radius: 5, text: 'Bobol brankas festival' }] },
+  { id: 12, day: 3, title: 'Pelarian Terakhir', difficulty: 'finale', briefing: 'Dana festival di tangan. Wanted 5, helikopter di atas. Lari ke Bukit — lompat dan hilang!', steps: [
+    { type: 'escape', x: 120, z: -220, radius: 10, text: 'Melintasi Jembatan Bara dengan wanted 5', wanted: 5 },
+    { type: 'stunt', x: 90, z: -330, radius: 8, text: 'Lompat dari ramp Bukit untuk kabur' },
+    { type: 'goto', x: 90, z: -380, radius: 10, text: 'Sampai di Viewpoint Bukit — kamu bebas!' },
+  ] },
+];
 
-export function createMissionState() {
-  return {
-    index: 0, // current mission in MISSIONS
-    step: 0,
-    active: false,
-    done: false, // all seven finished
-    beacon: null,
-    beaconLight: null,
-    targetCar: null,
-    killsNeeded: 0,
-    killsAtStart: 0,
-    holdTimer: 0,
-    chaseTimer: 0,
-    followTime: 0,
-    message: '',
-    messageTimer: 0,
-  };
+export function missionByIndex(index) { return MISSIONS[index] || null; }
+
+export function startMission(state, index) {
+  const mission = MISSIONS[index];
+  if (!mission) return false;
+  state.mission = mission;
+  state.missionIndex = index;
+  state.missionStep = 0;
+  state.missionActive = true;
+  state.missionTimer = 0;
+  state.mode = 'play';
+  state.day = mission.day;
+  state.flags.missionKills = 0;
+  applyStep(state);
+  state.message = 'MISI ' + mission.id + ': ' + mission.title;
+  state.messageTimer = 4;
+  return true;
 }
 
-export function currentMission(ms) {
-  return MISSIONS[ms.index] || null;
-}
-
-export function currentStep(ms) {
-  const m = currentMission(ms);
-  return m ? m.steps[ms.step] : null;
-}
-
-function makeBeacon(scene) {
-  const group = new THREE.Group();
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(3, 0.35, 8, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffd94d }),
-  );
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.4;
-  group.add(ring);
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.6, 2.4, 60, 12, 1, true),
-    new THREE.MeshBasicMaterial({
-      color: 0xffd94d, transparent: true, opacity: 0.28,
-      side: THREE.DoubleSide, depthWrite: false,
-    }),
-  );
-  beam.position.y = 30;
-  group.add(beam);
-  const light = new THREE.PointLight(0xffd94d, 40, 40, 1.6);
-  light.position.y = 4;
-  group.add(light);
-  scene.add(group);
-  return { group, light };
-}
-
-function placeBeacon(scene, ms, x, z) {
-  removeBeacon(scene, ms);
-  const b = makeBeacon(scene);
-  b.group.position.set(x, 0, z);
-  ms.beacon = b.group;
-  ms.beaconLight = b.light;
-}
-
-export function removeBeacon(scene, ms) {
-  if (ms.beacon) {
-    scene.remove(ms.beacon);
-    ms.beacon = null;
-    ms.beaconLight = null;
-  }
-}
-
-export function startMission(scene, ms, combat, police, index) {
-  ms.index = index;
-  ms.step = 0;
-  ms.active = true;
-  ms.holdTimer = 0;
-  ms.chaseTimer = 0;
-  ms.followTime = 0;
-  const m = currentMission(ms);
-  showMessage(ms, `${m.title} — ${m.giver}: ${m.brief}`);
-  enterStep(scene, ms, combat, police);
-}
-
-function enterStep(scene, ms, combat, police) {
-  const step = currentStep(ms);
+function applyStep(state) {
+  const step = state.mission.steps[state.missionStep];
   if (!step) return;
-  if (step.type === 'goto' || step.type === 'race' || step.type === 'grab' || step.type === 'escape') {
-    placeBeacon(scene, ms, step.pos[0], step.pos[2]);
+  state.objective = { text: step.text, x: step.x, z: step.z, kind: step.type };
+  if (state.markers.beacon) { state.markers.beacon.position.set(step.x, 0.2, step.z); }
+  if (state.markers.beam) { state.markers.beam.position.set(step.x, 30, step.z); }
+  if (step.type === 'kill') {
+    for (let i = 0; i < step.count; i += 1) {
+      spawnEnemy(state, step.x + (Math.random() - 0.5) * 18, step.z + (Math.random() - 0.5) * 18, 100);
+    }
+    state.flags.stepKills = 0;
+    state.flags.stepTotal = step.count;
+  }
+  if (step.type === 'escape' && step.wanted) {
+    state.wanted = Math.max(state.wanted, step.wanted);
+  }
+  if (step.type === 'race') startRace(state);
+  if (step.type === 'stunt') state.flags.stuntsBefore = state.stats.stunts;
+  if (step.type === 'jobtaxi') {
+    state.flags.taxiDone = false;
+    state.flags.taxiFailed = false;
+    startTaxiJob(state, 3);
+  }
+  if (step.time) state.missionTimer = step.time;
+}
+
+// Mission engine: advance steps, pay out, and move to the next day.
+export function updateMission(state, dt) {
+  if (!state.missionActive || !state.mission) return;
+  const step = state.mission.steps[state.missionStep];
+  if (!step) { completeMission(state); return; }
+  if (step.time) {
+    state.missionTimer -= dt;
+    if (state.missionTimer <= 0) { failMission(state, 'Waktu habis!'); return; }
+  }
+  const d = Math.hypot(state.player.x - step.x, state.player.z - step.z);
+  if (step.type === 'goto' || step.type === 'drive') {
+    if (d < step.radius) advanceStep(state);
   } else if (step.type === 'kill') {
-    placeBeacon(scene, ms, step.pos[0], step.pos[2]);
-    clearEnemies(scene, combat);
-    spawnEnemies(scene, combat, step.pos[0], step.pos[2], step.count, 100 + ms.index * 10);
-    ms.killsAtStart = combat.kills;
-  } else if (step.type === 'chase') {
-    if (ms.targetCar) scene.remove(ms.targetCar.mesh);
-    ms.targetCar = spawnTargetCar(scene, -100, -100);
-    ms.chaseTimer = 0;
-  }
-  if (step.wanted) raiseWanted(police, step.wanted);
-}
-
-export function showMessage(ms, text) {
-  ms.message = text;
-  ms.messageTimer = 7;
-}
-
-function advanceStep(scene, ms, combat, police, player) {
-  ms.step += 1;
-  const m = currentMission(ms);
-  if (ms.step >= m.steps.length) {
-    completeMission(scene, ms, combat, player);
-    return;
-  }
-  enterStep(scene, ms, combat, police);
-}
-
-function completeMission(scene, ms, combat, player) {
-  const m = currentMission(ms);
-  player.money += m.reward;
-  removeBeacon(scene, ms);
-  clearEnemies(scene, combat);
-  if (ms.targetCar) {
-    scene.remove(ms.targetCar.mesh);
-    ms.targetCar = null;
-  }
-  ms.active = false;
-  showMessage(ms, `Misi selesai: ${m.title}! +$${m.reward}`);
-  ms.justCompleted = m;
-  ms.index += 1;
-  if (ms.index >= MISSIONS.length) ms.done = true;
-}
-
-// Per-frame mission logic. Returns 'complete' on the frame a mission ends.
-export function updateMissions(scene, ms, combat, police, player, dt, G) {
-  if (ms.messageTimer > 0) ms.messageTimer -= dt;
-  if (ms.beacon) {
-    ms.beacon.rotation.y += dt * 0.8;
-    const s = 1 + Math.sin(performance.now() * 0.005) * 0.12;
-    ms.beacon.scale.set(s, 1, s);
-  }
-  if (!ms.active) return null;
-  const step = currentStep(ms);
-  if (!step) return null;
-  const px = player.pos.x;
-  const pz = player.pos.z;
-  const distTo = (x, z) => Math.sqrt((px - x) * (px - x) + (pz - z) * (pz - z));
-
-  if (step.type === 'goto' || step.type === 'race') {
-    if (distTo(step.pos[0], step.pos[2]) < step.radius) {
-      advanceStep(scene, ms, combat, police, player);
-      return ms.justCompleted ? 'complete' : 'step';
-    }
-  } else if (step.type === 'chase') {
-    if (!ms.targetCar) return null;
-    const t = ms.targetCar.mesh.position;
-    const d = Math.sqrt((px - t.x) * (px - t.x) + (pz - t.z) * (pz - t.z));
-    if (d < step.radius) ms.followTime += dt;
-    else ms.followTime = Math.max(0, ms.followTime - dt * 0.5);
-    ms.chaseTimer += dt;
-    if (ms.followTime > 8) {
-      advanceStep(scene, ms, combat, police, player);
-      return 'step';
-    }
-    if (d > step.loseRadius && ms.chaseTimer > 10) {
-      failMission(scene, ms, combat, 'Kehilangan jejak sedan hitam itu.');
-      return 'fail';
-    }
-  } else if (step.type === 'kill') {
-    const killed = combat.kills - ms.killsAtStart;
-    step.label = step.label.replace(/\(\d+\/\d+\)/, `(${killed}/${step.count})`);
-    if (aliveEnemies(combat) === 0 && killed >= step.count) {
-      advanceStep(scene, ms, combat, police, player);
-      return ms.justCompleted ? 'complete' : 'step';
-    }
-  } else if (step.type === 'grab') {
-    if (distTo(step.pos[0], step.pos[2]) < step.radius) {
-      ms.holdTimer += dt;
-      if (ms.holdTimer >= (step.holdSeconds || 3)) {
-        advanceStep(scene, ms, combat, police, player);
-        return ms.justCompleted ? 'complete' : 'step';
-      }
-    } else {
-      ms.holdTimer = 0;
-    }
+    const alive = state.enemies.filter((e) => e.alive).length;
+    if (alive === 0 && state.flags.stepTotal > 0) advanceStep(state);
+  } else if (step.type === 'steal') {
+    if (!state.player.onFoot) advanceStep(state);
   } else if (step.type === 'escape') {
-    if (distTo(step.pos[0], step.pos[2]) < step.radius && police.wanted === 0) {
-      advanceStep(scene, ms, combat, police, player);
-      return ms.justCompleted ? 'complete' : 'step';
+    if (state.wanted === 0 && d < step.radius) advanceStep(state);
+    else if (state.wanted === 0 && step.wanted) {
+      state.objective = { text: step.text, x: step.x, z: step.z, kind: step.type };
+      if (d < step.radius) advanceStep(state);
     }
+  } else if (step.type === 'stunt') {
+    if (state.stats.stunts > (state.flags.stuntsBefore || 0)) advanceStep(state);
+  } else if (step.type === 'race') {
+    if (!state.race) {
+      if (state.flags.raceWon) advanceStep(state);
+      else failMission(state, 'Doni memenangkan balapan.');
+    }
+  } else if (step.type === 'jobtaxi') {
+    if (!state.job && state.flags.taxiDone) advanceStep(state);
+    else if (!state.job && state.flags.taxiFailed) failMission(state, 'Job taksi gagal.');
   }
-  return null;
 }
 
-export function failMission(scene, ms, combat, reason) {
-  removeBeacon(scene, ms);
-  clearEnemies(scene, combat);
-  if (ms.targetCar) {
-    scene.remove(ms.targetCar.mesh);
-    ms.targetCar = null;
+function advanceStep(state) {
+  state.missionStep += 1;
+  if (state.missionStep >= state.mission.steps.length) { completeMission(state); return; }
+  applyStep(state);
+  state.message = state.objective.text;
+  state.messageTimer = 3;
+}
+
+export function completeMission(state) {
+  const mission = state.mission;
+  const money = MISSION_MONEY[mission.difficulty] || 150;
+  const respect = MISSION_RESPECT[mission.difficulty] || 25;
+  state.money += money;
+  state.respect += respect;
+  missionJingleSound();
+  state.missionActive = false;
+  state.mission = null;
+  state.flags.lastReward = { money, respect, title: mission.title };
+  state.mode = 'missiondone';
+  state.objective = { text: 'Misi selesai! Pilih misi berikutnya di menu.', x: state.player.x, z: state.player.z, kind: 'goto' };
+  const nextIndex = state.missionIndex + 1;
+  if (nextIndex < MISSIONS.length) {
+    const next = MISSIONS[nextIndex];
+    if (next.day !== mission.day) state.flags.pendingDay = next.day;
+  } else {
+    state.flags.gameComplete = true;
   }
-  ms.active = false;
-  showMessage(ms, `Misi gagal: ${reason} Bicara lagi dengan Raka untuk mengulang.`);
-  ms.justFailed = reason;
 }
 
-// Text for the HUD objective line and the mission list on the start screen.
-export function missionObjectiveText(ms) {
-  if (ms.done) return 'Semua misi selesai! Kamu legenda Kota Aruna.';
-  const m = currentMission(ms);
-  if (!m) return '';
-  if (!ms.active) return `Misi berikutnya: ${m.title} — tekan M untuk mulai`;
-  const step = currentStep(ms);
-  return step ? `${m.title}: ${step.label}` : m.title;
+export function failMission(state, reason) {
+  state.missionActive = false;
+  state.mission = null;
+  state.mode = 'missionfail';
+  state.flags.failReason = reason;
 }
 
-export function missionListText() {
-  return MISSIONS.map((m) => `${m.id}. ${m.title} — ${m.giver} ($${m.reward})`).join('\n');
+export function startNextMission(state) {
+  const nextIndex = state.missionIndex + 1;
+  if (nextIndex >= MISSIONS.length) return false;
+  if (state.flags.pendingDay) {
+    const day = state.flags.pendingDay;
+    state.flags.pendingDay = 0;
+    state.missionIndex = nextIndex;
+    import('./days.js').then((days) => days.showDayCard(state, day));
+    return true;
+  }
+  return startMission(state, nextIndex);
 }
 
-// Restart the current mission from its first step.
-export function retryMission(scene, ms, combat, police) {
-  startMission(scene, ms, combat, police, ms.index);
+export function retryMission(state) {
+  return startMission(state, state.missionIndex);
 }

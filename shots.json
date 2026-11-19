@@ -1,1 +1,18 @@
-[{"name":"1-chase.jpg","query":"?shot=chase&seed=1"},{"name":"2-neon-drive.jpg","query":"?shot=play&seed=1"},{"name":"3-shootout.jpg","query":"?shot=mission&seed=1"},{"name":"4-mission.jpg","query":"?shot=start&seed=1"}]
+[
+  {
+    "name": "1-chase.jpg",
+    "query": "?shot=chase&seed=1"
+  },
+  {
+    "name": "2-heist.jpg",
+    "query": "?shot=mission&seed=1"
+  },
+  {
+    "name": "3-race.jpg",
+    "query": "?shot=race&seed=1"
+  },
+  {
+    "name": "4-garage.jpg",
+    "query": "?shot=garage&seed=1"
+  }
+]

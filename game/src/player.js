@@ -1,139 +1,111 @@
-// Aruna Bay — the player: Dimas on foot (WASD, mouse orbit camera) and in a
-// car (E to enter/exit, steal parked and traffic cars). Health, money, ammo.
-
+// Mira on foot: third-person walking and running, camera-relative movement,
+// building collision, and entering / stealing cars with E.
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { makeRng } from './random.js';
-import { hitsCollider } from './world.js';
-import { makePersonMesh } from './pedestrians.js';
-import { nearestCar } from './vehicles.js';
+import { PLAYER } from './config.js';
+import { resolveCircleCollision } from './world.js';
+import { isOnLand } from './districts.js';
 
-export function createPlayer(scene, spawn) {
-  const mesh = makePersonMesh(makeRng(42));
-  // Dimas: red jacket so he is easy to spot in screenshots
-  mesh.children[0].material.color.set(0xc22e2e);
-  mesh.children[4].material.color.set(0xc22e2e);
-  mesh.children[5].material.color.set(0xc22e2e);
-  mesh.position.copy(spawn);
-  scene.add(mesh);
-  return {
-    mesh,
-    pos: mesh.position,
-    yaw: 0,
-    camYaw: 0,
-    camPitch: 0.32,
-    health: CONFIG.startHealth,
-    money: CONFIG.startMoney,
-    ammo: CONFIG.pistolAmmo,
-    hasGun: true,
-    inCar: false,
-    car: null,
-    walkPhase: 0,
-    speed: 0,
-    moving: false,
-  };
+export function makePlayerMesh() {
+  const group = new THREE.Group();
+  const jacket = new THREE.MeshLambertMaterial({ color: 0x2e8a7a });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 1.05, 10), jacket);
+  body.position.y = 1.0;
+  group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10), new THREE.MeshLambertMaterial({ color: 0xc98a5a }));
+  head.position.y = 1.78;
+  group.add(head);
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.29, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
+  hair.position.y = 1.84;
+  group.add(hair);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.55, 0.32), new THREE.MeshLambertMaterial({ color: 0x2a2a3a }));
+  legs.position.y = 0.28;
+  group.add(legs);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.7, 0.16), jacket);
+  arm.position.set(0.45, 1.05, 0.25);
+  arm.rotation.x = -0.9;
+  group.add(arm);
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.5), new THREE.MeshLambertMaterial({ color: 0x181818 }));
+  gun.position.set(0.45, 1.05, 0.55);
+  group.add(gun);
+  group.userData.arm = arm;
+  group.userData.gun = gun;
+  return group;
 }
 
-// On-foot movement, camera-relative. Returns nothing; mutates player.
-export function updatePlayerOnFoot(player, input, dt, colliders) {
-  const run = input.keys['shift'] ? CONFIG.playerRunSpeed : CONFIG.playerWalkSpeed;
-  let mx = 0;
-  let mz = 0;
-  if (input.keys['w']) mz += 1;
-  if (input.keys['s']) mz -= 1;
-  if (input.keys['a']) mx -= 1;
-  if (input.keys['d']) mx += 1;
-  const len = Math.sqrt(mx * mx + mz * mz);
-  player.moving = len > 0;
-  if (!player.moving) {
-    player.speed = 0;
-    return;
+export function updatePlayerOnFoot(state, input, dt, playerMesh) {
+  const p = state.player;
+  const fwd = input.forward();
+  const strafe = input.strafe();
+  const running = input.sprint();
+  if (fwd === 0 && strafe === 0) { p.moving = false; p.speed = 0; return; }
+  const speed = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
+  const yaw = state.cameraYaw;
+  const mx = Math.sin(yaw) * fwd + Math.cos(yaw) * strafe;
+  const mz = Math.cos(yaw) * fwd - Math.sin(yaw) * strafe;
+  const len = Math.hypot(mx, mz) || 1;
+  p.x += (mx / len) * speed * dt;
+  p.z += (mz / len) * speed * dt;
+  resolveCircleCollision(state, p, PLAYER.radius);
+  if (!isOnLand(p.x, p.z)) {
+    p.x -= (mx / len) * speed * dt;
+    p.z -= (mz / len) * speed * dt;
   }
-  mx /= len;
-  mz /= len;
-  // camera-relative: forward is where the camera looks
-  const cy = player.camYaw;
-  const fx = Math.sin(cy);
-  const fz = Math.cos(cy);
-  const rx = Math.cos(cy);
-  const rz = -Math.sin(cy);
-  const wx = fx * mz + rx * mx;
-  const wz = fz * mz + rz * mx;
-  player.speed = run;
-  const nx = player.pos.x + wx * run * dt;
-  const nz = player.pos.z + wz * run * dt;
-  if (!hitsCollider(colliders, nx, player.pos.z, 0.7)) player.pos.x = nx;
-  if (!hitsCollider(colliders, player.pos.x, nz, 0.7)) player.pos.z = nz;
-  player.yaw = Math.atan2(wx, wz);
-  player.mesh.rotation.y = player.yaw;
-  player.walkPhase += dt * run * 1.6;
-  const swing = Math.sin(player.walkPhase) * 0.55;
-  player.mesh.userData.legL.rotation.x = swing;
-  player.mesh.userData.legR.rotation.x = -swing;
-  player.mesh.userData.armL.rotation.x = -swing * 0.8;
-  player.mesh.userData.armR.rotation.x = swing * 0.8;
+  p.angle = Math.atan2(mx, mz);
+  p.moving = true;
+  p.speed = speed;
+  p.walkPhase = (p.walkPhase || 0) + dt * speed * 1.6;
+  playerMesh.position.set(p.x, Math.abs(Math.sin(p.walkPhase)) * 0.05, p.z);
+  playerMesh.rotation.y = p.angle;
+  state.stats.distance += speed * dt;
 }
 
-// Try to enter the nearest car (E). Returns the car or null.
-// Note: does not clear car.parked — the caller checks it first to tell a
-// stolen parked car from a carjacked traffic car, then clears it.
-export function tryEnterCar(player, cars) {
-  const car = nearestCar(cars, player.pos.x, player.pos.z, 5);
-  if (!car) return null;
-  player.inCar = true;
-  player.car = car;
-  car.isPlayerCar = true;
-  player.mesh.visible = false;
-  return car;
-}
-
-export function exitCar(player) {
-  if (!player.car) return;
-  const car = player.car;
-  player.inCar = false;
-  player.car = null;
-  car.isPlayerCar = false;
-  // step out to the driver's side
-  player.pos.set(
-    car.mesh.position.x - Math.cos(car.yaw) * 2.2,
-    0,
-    car.mesh.position.z + Math.sin(car.yaw) * 2.2,
-  );
-  player.mesh.visible = true;
-  player.mesh.position.copy(player.pos);
-}
-
-export function damagePlayer(player, amount) {
-  player.health = Math.max(0, player.health - amount);
-  return player.health <= 0;
-}
-
-export function healPlayer(player, amount) {
-  player.health = Math.min(CONFIG.startHealth, player.health + amount);
-}
-
-// Save / load progress in localStorage.
-export function saveGame(player, missionIndex) {
-  try {
-    localStorage.setItem(CONFIG.saveKey, JSON.stringify({
-      money: player.money,
-      health: player.health,
-      ammo: player.ammo,
-      mission: missionIndex,
-      x: player.pos.x,
-      z: player.pos.z,
-    }));
-    return true;
-  } catch {
-    return false;
+export function nearestCar(state, maxDist) {
+  let best = null; let bestD = maxDist;
+  for (const car of state.cars) {
+    if (car.police) continue;
+    const d = Math.hypot(car.x - state.player.x, car.z - state.player.z);
+    if (d < bestD) { bestD = d; best = car; }
   }
+  return best;
 }
 
-export function loadGame() {
-  try {
-    const raw = localStorage.getItem(CONFIG.saveKey);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
+export function tryEnterCar(state) {
+  if (!state.player.onFoot) return false;
+  const car = nearestCar(state, 4.2);
+  if (!car) return false;
+  state.player.onFoot = false;
+  state.car = car;
+  car.speed = 0;
+  if (car.traffic || car.parked) {
+    car.traffic = false;
+    car.parked = false;
+    state.traffic = state.traffic.filter((c) => c !== car);
+    state.wanted = Math.max(1, state.wanted);
+    state.wantedTimer = 0;
+    state.message = 'Mobil dicuri! Polisi mengejarmu.';
+    state.messageTimer = 3;
+  } else if (car.owned) {
+    state.message = car.ownedRef.name + ' — mobilmu.';
+    state.messageTimer = 2;
   }
+  return true;
+}
+
+export function exitCar(state) {
+  if (state.player.onFoot || !state.car) return;
+  const car = state.car;
+  const side = Math.cos(car.angle);
+  const sideX = Math.sin(car.angle);
+  state.player.x = car.x + sideX * 2.2;
+  state.player.z = car.z + side * 2.2;
+  state.player.angle = car.angle;
+  state.player.onFoot = true;
+  state.car = null;
+}
+
+// Mira's idle breathing and gun-aim pose helpers for the renderer.
+export function posePlayerMesh(mesh, aiming, time) {
+  if (!mesh) return;
+  mesh.userData.arm.rotation.x = aiming ? -1.5 : -0.9 + Math.sin(time * 2) * 0.05;
+  mesh.userData.gun.visible = aiming;
 }

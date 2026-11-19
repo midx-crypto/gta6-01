@@ -1,141 +1,132 @@
-// Aruna Bay — combat: pistol shooting with mouse aim, enemies with health,
-// a weapon pickup, muzzle flash and hit sparks. Shooting in public raises
-// the wanted level.
-
+// Combat: shooting from the camera aim, enemy gunmen who shoot back, and
+// the ammo pickups they sometimes drop.
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { makeRng, pick } from './random.js';
-import { makePersonMesh } from './pedestrians.js';
-import { raiseWanted } from './police.js';
+import { makePedMesh } from './pedestrians.js';
+import { gunshotSound } from './audio.js';
+import { panicPedestrians } from './pedestrians.js';
 
-export function createCombatState() {
-  return {
-    enemies: [],
-    pickup: null,
-    cooldown: 0,
-    lastShotAt: null,
-    kills: 0,
-  };
+export function spawnEnemy(state, x, z, hp) {
+  const mesh = makePedMesh(0x1a1a1a, 0x8a5a3a);
+  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.35), new THREE.MeshLambertMaterial({ color: 0x3a3a3a }));
+  vest.position.y = 1.05;
+  mesh.add(vest);
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.6), new THREE.MeshLambertMaterial({ color: 0x181818 }));
+  gun.position.set(0.4, 1.1, 0.4);
+  mesh.add(gun);
+  mesh.position.set(x, 0, z);
+  state.scene.add(mesh);
+  const enemy = { mesh, x, z, angle: 0, hp: hp || 100, shootTimer: 1 + Math.random(), alive: true, speed: 4 };
+  state.enemies.push(enemy);
+  return enemy;
 }
 
-export function spawnEnemies(scene, combat, x, z, count, seed) {
-  const rng = makeRng(seed);
-  for (let i = 0; i < count; i++) {
-    const mesh = makePersonMesh(rng);
-    mesh.children[0].material.color.set(0x8a2a2a);
-    mesh.children[4].material.color.set(0x8a2a2a);
-    mesh.children[5].material.color.set(0x8a2a2a);
-    const ex = x + (rng() - 0.5) * 20;
-    const ez = z + (rng() - 0.5) * 20;
-    mesh.position.set(ex, 0, ez);
-    scene.add(mesh);
-    combat.enemies.push({
-      mesh, health: 100, yaw: 0, shootTimer: 1 + rng() * 2,
-      speed: 3.2, walkPhase: rng() * 5, alive: true,
-    });
-  }
-}
-
-export function clearEnemies(scene, combat) {
-  for (const e of combat.enemies) scene.remove(e.mesh);
-  combat.enemies = [];
-}
-
-// Fire the pistol from the camera centre. Returns a shot record or null.
-export function shoot(camera, player, combat, scene, raycaster, onShot) {
-  if (combat.cooldown > 0 || player.ammo <= 0 || player.inCar) return null;
-  combat.cooldown = 0.22;
-  player.ammo -= 1;
-  raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-  const targets = combat.enemies.filter((e) => e.alive).map((e) => e.mesh);
-  const hits = raycaster.intersectObjects(targets, true);
-  let hitEnemy = null;
-  let hitPoint = null;
-  if (hits.length > 0) {
-    hitPoint = hits[0].point.clone();
-    // find which enemy owns the hit mesh
-    let obj = hits[0].object;
-    while (obj && !combat.enemies.some((e) => e.mesh === obj)) obj = obj.parent;
-    hitEnemy = combat.enemies.find((e) => e.mesh === obj) || null;
-    if (hitEnemy) {
-      hitEnemy.health -= CONFIG.pistolDamage;
-      if (hitEnemy.health <= 0) {
-        hitEnemy.alive = false;
-        hitEnemy.mesh.visible = false;
-        combat.kills += 1;
-      }
+export function updateEnemies(state, dt) {
+  for (const enemy of state.enemies) {
+    if (!enemy.alive) continue;
+    const dx = state.player.x - enemy.x;
+    const dz = state.player.z - enemy.z;
+    const d = Math.hypot(dx, dz);
+    enemy.angle = Math.atan2(dx, dz);
+    enemy.mesh.rotation.y = enemy.angle;
+    if (d > 26) {
+      enemy.x += Math.sin(enemy.angle) * enemy.speed * dt;
+      enemy.z += Math.cos(enemy.angle) * enemy.speed * dt;
+    } else if (d < 10) {
+      enemy.x -= Math.sin(enemy.angle) * enemy.speed * 0.5 * dt;
+      enemy.z -= Math.cos(enemy.angle) * enemy.speed * 0.5 * dt;
     }
-  } else {
-    hitPoint = raycaster.ray.origin.clone().add(raycaster.ray.direction.clone().multiplyScalar(60));
-  }
-  combat.lastShotAt = player.pos.clone();
-  if (onShot) onShot(hitPoint, !!hitEnemy);
-  return { hitEnemy, hitPoint };
-}
-
-export function updateCombat(combat, dt, player, police, scene, onEnemyShot) {
-  combat.cooldown = Math.max(0, combat.cooldown - dt);
-  for (const e of combat.enemies) {
-    if (!e.alive) continue;
-    const dx = player.pos.x - e.mesh.position.x;
-    const dz = player.pos.z - e.mesh.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist > 45) continue;
-    e.yaw = Math.atan2(dx, dz);
-    e.mesh.rotation.y = e.yaw;
-    if (dist > 10) {
-      const step = e.speed * dt;
-      e.mesh.position.x += Math.sin(e.yaw) * step;
-      e.mesh.position.z += Math.cos(e.yaw) * step;
-      e.walkPhase += dt * 6;
-      const swing = Math.sin(e.walkPhase) * 0.5;
-      e.mesh.userData.legL.rotation.x = swing;
-      e.mesh.userData.legR.rotation.x = -swing;
-    } else {
-      e.shootTimer -= dt;
-      if (e.shootTimer <= 0) {
-        e.shootTimer = 1.4 + Math.random() * 1.2;
-        // enemy fires: 35% chance to hit
-        if (Math.random() < 0.35 && onEnemyShot) onEnemyShot(e);
+    enemy.mesh.position.set(enemy.x, 0, enemy.z);
+    enemy.shootTimer -= dt;
+    if (d < 30 && enemy.shootTimer <= 0) {
+      enemy.shootTimer = 1.4 + Math.random() * 0.8;
+      if (Math.random() < 0.55) {
+        state.health -= 4;
+        state.message = 'Kamu tertembak!';
+        state.messageTimer = 1.2;
+        if (state.health <= 0) state.mode = 'wasted';
       }
     }
   }
+  state.enemies = state.enemies.filter((e) => e.alive);
 }
 
-// Count how many mission enemies are still alive.
-export function aliveEnemies(combat) {
-  return combat.enemies.filter((e) => e.alive).length;
-}
-
-// A floating ammo pickup: walk over it to refill.
-export function spawnAmmoPickup(scene, x, z) {
-  const group = new THREE.Group();
-  const box = new THREE.Mesh(
-    new THREE.BoxGeometry(0.7, 0.25, 0.5),
-    new THREE.MeshPhongMaterial({ color: 0x2a2a2a, shininess: 60 }),
-  );
-  group.add(box);
-  const glow = new THREE.Mesh(
-    new THREE.BoxGeometry(0.8, 0.06, 0.6),
-    new THREE.MeshBasicMaterial({ color: 0xffe14d }),
-  );
-  glow.position.y = 0.2;
-  group.add(glow);
-  group.position.set(x, 0.6, z);
-  scene.add(group);
-  return { mesh: group, taken: false };
-}
-
-export function updatePickup(combat, player, dt) {
-  const p = combat.pickup;
-  if (!p || p.taken) return;
-  p.mesh.rotation.y += dt * 1.5;
-  p.mesh.position.y = 0.6 + Math.sin(performance.now() * 0.003) * 0.15;
-  const dx = player.pos.x - p.mesh.position.x;
-  const dz = player.pos.z - p.mesh.position.z;
-  if (Math.sqrt(dx * dx + dz * dz) < 2) {
-    p.taken = true;
-    p.mesh.visible = false;
-    player.ammo = Math.min(240, player.ammo + 60);
+function nearestTargetInCone(state, origin, dir, maxRange, maxCos) {
+  let best = null; let bestD = maxRange;
+  const targets = [];
+  for (const e of state.enemies) if (e.alive) targets.push({ x: e.x, z: e.z, ref: e, kind: 'enemy' });
+  for (const c of state.cops) targets.push({ x: c.x, z: c.z, ref: c, kind: 'cop' });
+  for (const car of state.policeCars) targets.push({ x: car.x, z: car.z, ref: car, kind: 'policecar' });
+  for (const t of targets) {
+    const dx = t.x - origin.x;
+    const dz = t.z - origin.z;
+    const d = Math.hypot(dx, dz);
+    if (d > maxRange || d < 0.5) continue;
+    const cos = (dx * dir.x + dz * dir.z) / d;
+    if (cos < maxCos) continue;
+    if (d < bestD) { bestD = d; best = { ...t, dist: d }; }
   }
+  return best;
+}
+
+export function fireWeapon(state, camera) {
+  const w = state.weapons[state.currentWeapon];
+  if (!w || state.weaponCooldown > 0) return null;
+  if (w.ammo <= 0) {
+    state.message = 'Amunisi habis! Tekan R untuk isi ulang.';
+    state.messageTimer = 1.5;
+    state.weaponCooldown = 0.3;
+    return null;
+  }
+  w.ammo -= 1;
+  state.weaponCooldown = w.rate;
+  state.stats.shots += 1;
+  gunshotSound(state.currentWeapon);
+  const origin = { x: state.player.x, z: state.player.z };
+  const dir = { x: Math.sin(state.player.angle), z: Math.cos(state.player.angle) };
+  const shots = state.currentWeapon === 'shotgun' ? 5 : 1;
+  let hitAny = null;
+  for (let i = 0; i < shots; i += 1) {
+    const spread = (Math.random() - 0.5) * w.spread * 2;
+    const d2 = { x: dir.x + Math.cos(state.player.angle) * spread, z: dir.z - Math.sin(state.player.angle) * spread };
+    const hit = nearestTargetInCone(state, origin, d2, w.range, 0.92);
+    if (hit) {
+      hitAny = hit;
+      state.stats.hits += 1;
+      if (hit.kind === 'enemy') {
+        hit.ref.hp -= w.damage;
+        if (hit.ref.hp <= 0) {
+          hit.ref.alive = false;
+          state.scene.remove(hit.ref.mesh);
+          state.stats.kills += 1;
+          state.money += 20;
+          state.respect += 2;
+          if (Math.random() < 0.4) {
+            state.weapons[state.currentWeapon].reserve += 12;
+            state.message = '+$20, +2 respect, +12 amunisi';
+            state.messageTimer = 2;
+          }
+        }
+      } else if (hit.kind === 'cop') {
+        state.scene.remove(hit.ref.mesh);
+        state.cops = state.cops.filter((c) => c !== hit.ref);
+        state.wanted = Math.min(5, state.wanted + 1);
+        state.stats.kills += 1;
+      } else if (hit.kind === 'policecar') {
+        hit.ref.speed *= 0.5;
+        state.wanted = Math.min(5, state.wanted + 1);
+      }
+    }
+  }
+  panicPedestrians(state, origin.x, origin.z, 30);
+  if (!state.player.onFoot) state.wanted = Math.min(5, state.wanted);
+  return hitAny;
+}
+
+// Ammo drops and enemy cleanup helpers.
+export function clearEnemies(state) {
+  for (const e of state.enemies) state.scene.remove(e.mesh);
+  state.enemies = [];
+}
+export function enemiesAlive(state) {
+  return state.enemies.filter((e) => e.alive).length;
 }

@@ -1,155 +1,158 @@
-// Aruna Bay — police: the wanted system. Crimes raise stars; police cars
-// and foot cops chase the player; get caught on foot and you are busted,
-// lose all health and you are wasted. Hide or outrun them to cool down.
-
+// Wanted system: stars 0-5, police cars that chase and ram, foot cops that
+// chase on foot, roadblocks at 5 stars, decay when the player hides, and the
+// busted / wasted endings.
 import * as THREE from 'three';
-import { WANTED_RESPONSE, HEAT_COOLDOWN_SECONDS } from './config.js';
-import { makeRng } from './random.js';
-import { createCar, driveCar } from './vehicles.js';
-import { makePersonMesh } from './pedestrians.js';
+import { WANTED_DECAY_SECONDS } from './config.js';
+import { makeCarMesh } from './vehicles.js';
+import { makePedMesh } from './pedestrians.js';
+import { sirenSound } from './audio.js';
 
-export function createPoliceState() {
-  return {
-    wanted: 0,
-    heatTimer: 0, // seconds since the last crime
-    cars: [],
-    cops: [],
-    bustedTimer: 0,
-    sirenPhase: 0,
-  };
+export function setWanted(state, level) {
+  state.wanted = Math.max(0, Math.min(5, level));
+  state.wantedTimer = 0;
 }
 
-export function raiseWanted(police, amount) {
-  police.wanted = Math.min(5, police.wanted + amount);
-  police.heatTimer = 0;
+export function addWanted(state, amount) {
+  setWanted(state, state.wanted + amount);
 }
 
-export function clearWanted(police) {
-  police.wanted = 0;
-  police.heatTimer = 0;
+export function placePoliceCar(state, x, z, angle) {
+  const car = spawnPoliceCar(state, x, z);
+  car.angle = angle;
+  car.mesh.rotation.y = angle;
+  return car;
 }
 
-// Spawn / despawn police units to match the current wanted level.
-export function syncPoliceUnits(scene, police, playerPos) {
-  const want = WANTED_RESPONSE[police.wanted];
-  if (!want) {
-    // remove all units
-    for (const c of police.cars) scene.remove(c.mesh);
-    for (const c of police.cops) scene.remove(c.mesh);
-    police.cars = [];
-    police.cops = [];
-    return;
+function spawnPoliceCar(state, x, z) {
+  const mesh = makeCarMesh(0x1a1a2e, { police: true });
+  mesh.position.set(x, 0, z);
+  state.scene.add(mesh);
+  const car = { mesh, x, z, angle: 0, speed: 0, targetSpeed: 30, traffic: false, owned: false, police: true, y: 0, vy: 0 };
+  state.policeCars.push(car);
+  state.cars.push(car);
+  return car;
+}
+
+function spawnFootCop(state, x, z) {
+  const mesh = makePedMesh(0x1a2e5a, 0xc98a5a);
+  const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.14, 10), new THREE.MeshLambertMaterial({ color: 0x101020 }));
+  hat.position.y = 1.92;
+  mesh.add(hat);
+  mesh.position.set(x, 0, z);
+  state.scene.add(mesh);
+  const cop = { mesh, x, z, angle: 0, speed: 6.5, holdTimer: 0 };
+  state.cops.push(cop);
+  return cop;
+}
+
+export function updatePolice(state, dt) {
+  const wanted = state.wanted;
+  sirenSound(wanted > 0);
+  const wantCars = wanted === 0 ? 0 : wanted <= 2 ? 1 : wanted <= 3 ? 2 : 3;
+  const wantCops = wanted === 0 ? 0 : wanted <= 1 ? 1 : wanted <= 3 ? 2 : 4;
+
+  while (state.policeCars.length < wantCars) {
+    const a = Math.random() * Math.PI * 2;
+    spawnPoliceCar(state, state.player.x + Math.cos(a) * 55, state.player.z + Math.sin(a) * 55);
   }
-  const rng = makeRng(1234 + police.wanted);
-  while (police.cars.length < want.policeCars) {
-    const a = rng() * Math.PI * 2;
-    const car = createCar(
-      scene,
-      playerPos.x + Math.cos(a) * 45,
-      playerPos.z + Math.sin(a) * 45,
-      rng() * Math.PI * 2, 0xffffff, { police: true },
+  while (state.policeCars.length > wantCars) {
+    const car = state.policeCars.pop();
+    state.scene.remove(car.mesh);
+    state.cars = state.cars.filter((c) => c !== car);
+  }
+  while (state.cops.length < wantCops) {
+    const a = Math.random() * Math.PI * 2;
+    spawnFootCop(state, state.player.x + Math.cos(a) * 22, state.player.z + Math.sin(a) * 22);
+  }
+  while (state.cops.length > wantCops) {
+    const cop = state.cops.pop();
+    state.scene.remove(cop.mesh);
+  }
+
+  for (const car of state.policeCars) {
+    const dx = state.player.x - car.x;
+    const dz = state.player.z - car.z;
+    const d = Math.hypot(dx, dz);
+    const wantAngle = Math.atan2(dx, dz);
+    let diff = wantAngle - car.angle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    car.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
+    const target = d > 6 ? 30 + wanted * 2 : 12;
+    car.speed += (target - car.speed) * Math.min(1, dt * 1.5);
+    car.x += Math.sin(car.angle) * car.speed * dt;
+    car.z += Math.cos(car.angle) * car.speed * dt;
+    car.mesh.position.set(car.x, 0, car.z);
+    car.mesh.rotation.y = car.angle;
+    if (d < 2.6 && !state.player.onFoot) {
+      state.car.speed *= 0.92;
+      if (Math.abs(state.car.speed) < 3 && wanted >= 3) state.health -= 4 * dt;
+    }
+  }
+
+  for (const cop of state.cops) {
+    const dx = state.player.x - cop.x;
+    const dz = state.player.z - cop.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 1.4 && state.player.onFoot) {
+      cop.holdTimer += dt;
+      if (cop.holdTimer > 1.2) { state.mode = 'busted'; return; }
+    } else cop.holdTimer = 0;
+    const wantAngle = Math.atan2(dx, dz);
+    cop.angle = wantAngle;
+    cop.x += Math.sin(cop.angle) * cop.speed * dt;
+    cop.z += Math.cos(cop.angle) * cop.speed * dt;
+    cop.mesh.position.set(cop.x, 0, cop.z);
+    cop.mesh.rotation.y = cop.angle;
+  }
+
+  if (wanted > 0) {
+    const nearest = Math.min(
+      ...state.policeCars.map((c) => Math.hypot(c.x - state.player.x, c.z - state.player.z)),
+      ...state.cops.map((c) => Math.hypot(c.x - state.player.x, c.z - state.player.z)),
+      Infinity,
     );
-    police.cars.push(car);
+    if (nearest > 45) {
+      state.wantedTimer += dt;
+      if (state.wantedTimer > WANTED_DECAY_SECONDS) {
+        state.wantedTimer = 0;
+        state.wanted -= 1;
+        state.message = state.wanted === 0 ? 'Kamu lolos dari polisi.' : 'Bintang wanted berkurang.';
+        state.messageTimer = 2.5;
+      }
+    } else state.wantedTimer = 0;
   }
-  while (police.cops.length < want.footCops) {
-    const mesh = makePersonMesh(makeRng(777 + police.cops.length));
-    // dark blue uniform on torso, arms and legs only (head stays skin tone)
-    const uniform = new THREE.Color(0x1a2a5a);
-    mesh.children[0].material.color.copy(uniform);
-    mesh.children[2].material.color.copy(uniform);
-    mesh.children[3].material.color.copy(uniform);
-    mesh.children[4].material.color.copy(uniform);
-    mesh.children[5].material.color.copy(uniform);
-    const a = rng() * Math.PI * 2;
-    mesh.position.set(playerPos.x + Math.cos(a) * 18, 0, playerPos.z + Math.sin(a) * 18);
-    scene.add(mesh);
-    police.cops.push({ mesh, yaw: 0, speed: 5.2, walkPhase: 0 });
-  }
-  while (police.cars.length > want.policeCars) {
-    const c = police.cars.pop();
-    scene.remove(c.mesh);
-  }
-  while (police.cops.length > want.footCops) {
-    const c = police.cops.pop();
-    scene.remove(c.mesh);
-  }
+  if (state.health <= 0) state.mode = 'wasted';
 }
 
-function turnToward(current, target) {
-  let diff = target - current;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  return diff;
+// Roadblock: at wanted 5 two police cars park across the road ahead of the
+// player, forcing a detour or a smash-through.
+export function maybeRoadblock(state) {
+  if (state.wanted < 5 || state.roadblock) return;
+  state.roadblock = true;
+  const px = state.player.x; const pz = state.player.z;
+  const ahead = state.player.onFoot ? state.player.angle : (state.car ? state.car.angle : 0);
+  const bx = px + Math.sin(ahead) * 45;
+  const bz = pz + Math.cos(ahead) * 45;
+  for (const off of [-4, 4]) {
+    const mesh = makeCarMesh(0x1a1a2e, { police: true });
+    mesh.position.set(bx + Math.cos(ahead) * off, 0, bz - Math.sin(ahead) * off);
+    mesh.rotation.y = ahead + Math.PI / 2;
+    state.scene.add(mesh);
+    const car = { mesh, x: mesh.position.x, z: mesh.position.z, angle: ahead + Math.PI / 2, speed: 0, targetSpeed: 0, traffic: false, owned: false, police: true, roadblock: true, y: 0, vy: 0 };
+    state.policeCars.push(car);
+    state.cars.push(car);
+  }
+  state.message = 'ROADBLOCK di depan! Cari jalan lain.';
+  state.messageTimer = 3;
 }
-
-// Returns 'busted' when a cop catches the player on foot, else null.
-export function updatePolice(scene, police, dt, player, colliders, allCars) {
-  if (police.wanted === 0) {
-    syncPoliceUnits(scene, police, player.pos);
-    return null;
+export function clearRoadblock(state) {
+  if (!state.roadblock) return;
+  state.roadblock = false;
+  const blocked = state.policeCars.filter((c) => c.roadblock);
+  for (const car of blocked) {
+    state.scene.remove(car.mesh);
+    state.cars = state.cars.filter((c) => c !== car);
   }
-  police.heatTimer += dt;
-  police.sirenPhase += dt;
-  // heat cools down if the player stays out of sight for a while
-  if (police.heatTimer > HEAT_COOLDOWN_SECONDS && police.wanted > 0) {
-    police.wanted -= 1;
-    police.heatTimer = 0;
-  }
-  syncPoliceUnits(scene, police, player.pos);
-  const want = WANTED_RESPONSE[police.wanted];
-  if (!want) return null;
-
-  const target = player.inCar ? player.car.mesh.position : player.pos;
-  for (const car of police.cars) {
-    const dx = target.x - car.mesh.position.x;
-    const dz = target.z - car.mesh.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    const wantYaw = Math.atan2(dx, dz);
-    const diff = turnToward(car.yaw, wantYaw);
-    const steer = Math.max(-1, Math.min(1, diff * 2.4));
-    const throttle = dist > 6 ? 0.85 : 0.2;
-    driveCar(car, { throttle, steer }, dt, colliders, allCars);
-    car.speed = Math.min(car.speed, want.chaseSpeed);
-    // flash the light bar
-    if (car.mesh.userData.lightBar) {
-      const on = Math.floor(police.sirenPhase * 4) % 2 === 0;
-      car.mesh.userData.lightBar.material.color.set(on ? 0xff2233 : 0x2255ff);
-    }
-    // ram the player car
-    if (player.inCar && dist < 4) {
-      player.car.speed *= 0.94;
-    }
-  }
-  // foot cops run at the player; catching means busted
-  for (const cop of police.cops) {
-    const dx = player.pos.x - cop.mesh.position.x;
-    const dz = player.pos.z - cop.mesh.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist < 1.6 && !player.inCar) {
-      police.bustedTimer += dt;
-      if (police.bustedTimer > 1.2) return 'busted';
-    } else {
-      police.bustedTimer = Math.max(0, police.bustedTimer - dt);
-    }
-    cop.yaw = Math.atan2(dx, dz);
-    const step = Math.min(dist, cop.speed * dt);
-    cop.mesh.position.x += Math.sin(cop.yaw) * step;
-    cop.mesh.position.z += Math.cos(cop.yaw) * step;
-    cop.walkPhase += dt * 8;
-    const swing = Math.sin(cop.walkPhase) * 0.5;
-    cop.mesh.userData.legL.rotation.x = swing;
-    cop.mesh.userData.legR.rotation.x = -swing;
-    cop.mesh.rotation.y = cop.yaw;
-  }
-  return null;
-}
-
-export function resetPoliceAfterBusted(scene, police) {
-  for (const c of police.cars) scene.remove(c.mesh);
-  for (const c of police.cops) scene.remove(c.mesh);
-  police.cars = [];
-  police.cops = [];
-  police.wanted = 0;
-  police.heatTimer = 0;
-  police.bustedTimer = 0;
+  state.policeCars = state.policeCars.filter((c) => !c.roadblock);
 }
