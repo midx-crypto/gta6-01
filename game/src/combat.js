@@ -1,113 +1,141 @@
-// Solara Nights — combat.js
-// Shooting: mouse aim, click to fire the pistol, bullets, reloads, hits on
-// pedestrians, guards and cars, and the wanted heat that follows.
+// Aruna Bay — combat: pistol shooting with mouse aim, enemies with health,
+// a weapon pickup, muzzle flash and hit sparks. Shooting in public raises
+// the wanted level.
 
-import { CFG } from './config.js';
-import { addWanted } from './police.js';
-import { damageCar, spawnSparks } from './vehicles.js';
-import { scareNearbyPeds } from './pedestrians.js';
-import { wasPressed } from './input.js';
+import * as THREE from 'three';
+import { CONFIG } from './config.js';
+import { makeRng, pick } from './random.js';
+import { makePersonMesh } from './pedestrians.js';
+import { raiseWanted } from './police.js';
 
-export function updateCombat(S, dt) {
-  const p = S.player;
-  const input = S.input;
-  if (S.state !== 'play') return;
+export function createCombatState() {
+  return {
+    enemies: [],
+    pickup: null,
+    cooldown: 0,
+    lastShotAt: null,
+    kills: 0,
+  };
+}
 
-  // Aim from the player toward the mouse in world space.
-  const wx = S.cam.x + input.mouseX;
-  const wy = S.cam.y + input.mouseY;
-  const aim = Math.atan2(wy - p.y, wx - p.x);
-  p.aimAngle = aim;
+export function spawnEnemies(scene, combat, x, z, count, seed) {
+  const rng = makeRng(seed);
+  for (let i = 0; i < count; i++) {
+    const mesh = makePersonMesh(rng);
+    mesh.children[0].material.color.set(0x8a2a2a);
+    mesh.children[4].material.color.set(0x8a2a2a);
+    mesh.children[5].material.color.set(0x8a2a2a);
+    const ex = x + (rng() - 0.5) * 20;
+    const ez = z + (rng() - 0.5) * 20;
+    mesh.position.set(ex, 0, ez);
+    scene.add(mesh);
+    combat.enemies.push({
+      mesh, health: 100, yaw: 0, shootTimer: 1 + rng() * 2,
+      speed: 3.2, walkPhase: rng() * 5, alive: true,
+    });
+  }
+}
 
-  // R reloads from the reserve.
-  if (wasPressed(input, 'r')) reload(S);
+export function clearEnemies(scene, combat) {
+  for (const e of combat.enemies) scene.remove(e.mesh);
+  combat.enemies = [];
+}
 
-  // Click (or hold) to shoot, on foot or leaning out of the car.
-  S.shootCooldown -= dt;
-  if (input.mouseDown && S.shootCooldown <= 0) {
-    if (p.ammo > 0) {
-      fireBullet(S, aim);
-    } else if (p.reserveAmmo > 0) {
-      reload(S);
+// Fire the pistol from the camera centre. Returns a shot record or null.
+export function shoot(camera, player, combat, scene, raycaster, onShot) {
+  if (combat.cooldown > 0 || player.ammo <= 0 || player.inCar) return null;
+  combat.cooldown = 0.22;
+  player.ammo -= 1;
+  raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+  const targets = combat.enemies.filter((e) => e.alive).map((e) => e.mesh);
+  const hits = raycaster.intersectObjects(targets, true);
+  let hitEnemy = null;
+  let hitPoint = null;
+  if (hits.length > 0) {
+    hitPoint = hits[0].point.clone();
+    // find which enemy owns the hit mesh
+    let obj = hits[0].object;
+    while (obj && !combat.enemies.some((e) => e.mesh === obj)) obj = obj.parent;
+    hitEnemy = combat.enemies.find((e) => e.mesh === obj) || null;
+    if (hitEnemy) {
+      hitEnemy.health -= CONFIG.pistolDamage;
+      if (hitEnemy.health <= 0) {
+        hitEnemy.alive = false;
+        hitEnemy.mesh.visible = false;
+        combat.kills += 1;
+      }
+    }
+  } else {
+    hitPoint = raycaster.ray.origin.clone().add(raycaster.ray.direction.clone().multiplyScalar(60));
+  }
+  combat.lastShotAt = player.pos.clone();
+  if (onShot) onShot(hitPoint, !!hitEnemy);
+  return { hitEnemy, hitPoint };
+}
+
+export function updateCombat(combat, dt, player, police, scene, onEnemyShot) {
+  combat.cooldown = Math.max(0, combat.cooldown - dt);
+  for (const e of combat.enemies) {
+    if (!e.alive) continue;
+    const dx = player.pos.x - e.mesh.position.x;
+    const dz = player.pos.z - e.mesh.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > 45) continue;
+    e.yaw = Math.atan2(dx, dz);
+    e.mesh.rotation.y = e.yaw;
+    if (dist > 10) {
+      const step = e.speed * dt;
+      e.mesh.position.x += Math.sin(e.yaw) * step;
+      e.mesh.position.z += Math.cos(e.yaw) * step;
+      e.walkPhase += dt * 6;
+      const swing = Math.sin(e.walkPhase) * 0.5;
+      e.mesh.userData.legL.rotation.x = swing;
+      e.mesh.userData.legR.rotation.x = -swing;
     } else {
-      S.shootCooldown = 0.3;
-    }
-  }
-
-  // Move bullets and test hits.
-  for (const b of S.bullets) {
-    b.x += Math.cos(b.angle) * CFG.BULLET_SPEED * dt;
-    b.y += Math.sin(b.angle) * CFG.BULLET_SPEED * dt;
-    b.life -= dt;
-    // Hit a pedestrian or guard.
-    for (const ped of S.peds) {
-      if (ped.dead) continue;
-      if (Math.hypot(ped.x - b.x, ped.y - b.y) < 14) {
-        ped.hp -= CFG.PISTOL_DAMAGE;
-        b.life = 0;
-        spawnSparks(S, b.x, b.y, 5);
-        if (ped.hp <= 0) {
-          ped.dead = true;
-          if (ped.hostile) {
-            S.missionKills += 1;
-            S.message = `Penjaga dilumpuhkan! ${S.missionKills}/3`;
-            S.msgT = 2;
-          } else {
-            addWanted(S, 1);
-          }
-        } else if (!ped.hostile) {
-          ped.fleeing = true;
-          ped.fleeT = 4;
-        }
-        break;
-      }
-    }
-    if (b.life <= 0) continue;
-    // Hit a car (not the player's own).
-    for (const car of S.cars) {
-      if (car.dead) continue;
-      if (p.inCar === car) continue;
-      const dx = Math.cos(car.angle);
-      const dy = Math.sin(car.angle);
-      const lx = b.x - car.x;
-      const ly = b.y - car.y;
-      const along = lx * dx + ly * dy;
-      const across = Math.abs(lx * -dy + ly * dx);
-      if (Math.abs(along) < 26 && across < 14) {
-        damageCar(S, car, CFG.PISTOL_DAMAGE);
-        b.life = 0;
-        if (car.kind === 'police') addWanted(S, 1);
-        break;
+      e.shootTimer -= dt;
+      if (e.shootTimer <= 0) {
+        e.shootTimer = 1.4 + Math.random() * 1.2;
+        // enemy fires: 35% chance to hit
+        if (Math.random() < 0.35 && onEnemyShot) onEnemyShot(e);
       }
     }
   }
-  S.bullets = S.bullets.filter((b) => b.life > 0);
 }
 
-function fireBullet(S, angle) {
-  const p = S.player;
-  p.ammo -= 1;
-  S.shootCooldown = 0.22;
-  const ox = p.x + Math.cos(angle) * 22;
-  const oy = p.y + Math.sin(angle) * 22;
-  S.bullets.push({ x: ox, y: oy, angle, life: 1.1 });
-  S.audio.shot();
-  scareNearbyPeds(S, p.x, p.y, 320);
-  // Muzzle flash particle plus a short tracer streak.
-  S.particles.push({ x: ox, y: oy, vx: 0, vy: 0, life: 0.07, maxLife: 0.07, color: '#ffe9a3', size: 7 });
-  S.particles.push({ x: ox + Math.cos(angle) * 12, y: oy + Math.sin(angle) * 12, vx: 0, vy: 0, life: 0.05, maxLife: 0.05, color: '#fff', size: 3 });
-  // Firing in public draws the police.
-  if (S.wanted < 1) addWanted(S, 1);
+// Count how many mission enemies are still alive.
+export function aliveEnemies(combat) {
+  return combat.enemies.filter((e) => e.alive).length;
 }
 
-function reload(S) {
-  const p = S.player;
-  if (p.ammo >= CFG.PISTOL_MAG || p.reserveAmmo <= 0) return;
-  const need = CFG.PISTOL_MAG - p.ammo;
-  const take = Math.min(need, p.reserveAmmo);
-  p.ammo += take;
-  p.reserveAmmo -= take;
-  S.audio.click();
-  S.message = 'Pistol diisi ulang.';
-  S.msgT = 1.5;
+// A floating ammo pickup: walk over it to refill.
+export function spawnAmmoPickup(scene, x, z) {
+  const group = new THREE.Group();
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(0.7, 0.25, 0.5),
+    new THREE.MeshPhongMaterial({ color: 0x2a2a2a, shininess: 60 }),
+  );
+  group.add(box);
+  const glow = new THREE.Mesh(
+    new THREE.BoxGeometry(0.8, 0.06, 0.6),
+    new THREE.MeshBasicMaterial({ color: 0xffe14d }),
+  );
+  glow.position.y = 0.2;
+  group.add(glow);
+  group.position.set(x, 0.6, z);
+  scene.add(group);
+  return { mesh: group, taken: false };
+}
+
+export function updatePickup(combat, player, dt) {
+  const p = combat.pickup;
+  if (!p || p.taken) return;
+  p.mesh.rotation.y += dt * 1.5;
+  p.mesh.position.y = 0.6 + Math.sin(performance.now() * 0.003) * 0.15;
+  const dx = player.pos.x - p.mesh.position.x;
+  const dz = player.pos.z - p.mesh.position.z;
+  if (Math.sqrt(dx * dx + dz * dz) < 2) {
+    p.taken = true;
+    p.mesh.visible = false;
+    player.ammo = Math.min(240, player.ammo + 60);
+  }
 }

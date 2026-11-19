@@ -1,110 +1,231 @@
-// Solara Nights — missions.js
-// The story arc: three jobs for Raka, given by Sari and Bayu, tracked with a
-// live objective marker, progress text and cash rewards.
+// Aruna Bay — missions: the seven-mission story arc. A state machine with
+// steps (goto, chase, kill, deliver, escape, race, grab) driving a 3D beacon,
+// HUD objective text and minimap blips, and paying out on completion.
 
-import { MISSIONS, CFG } from './config.js';
-import { spawnGuards } from './pedestrians.js';
+import * as THREE from 'three';
+import { MISSIONS } from './config.js';
+import { spawnEnemies, clearEnemies, aliveEnemies } from './combat.js';
+import { spawnTargetCar } from './traffic.js';
+import { raiseWanted } from './police.js';
 
-export function currentMission(S) {
-  if (S.missionIdx >= MISSIONS.length) return null;
-  return MISSIONS[S.missionIdx];
+export function createMissionState() {
+  return {
+    index: 0, // current mission in MISSIONS
+    step: 0,
+    active: false,
+    done: false, // all seven finished
+    beacon: null,
+    beaconLight: null,
+    targetCar: null,
+    killsNeeded: 0,
+    killsAtStart: 0,
+    holdTimer: 0,
+    chaseTimer: 0,
+    followTime: 0,
+    message: '',
+    messageTimer: 0,
+  };
 }
 
-export function missionObjective(S) {
-  const m = currentMission(S);
-  return m ? m.objective : null;
+export function currentMission(ms) {
+  return MISSIONS[ms.index] || null;
 }
 
-export function startMission(S, idx) {
-  S.missionIdx = idx;
-  S.missionKills = 0;
-  const m = MISSIONS[idx];
-  if (!m) return;
-  S.message = `Misi ${idx + 1}: ${m.title} — ${m.brief}`;
-  S.msgT = 6;
-  if (m.objective.type === 'eliminate') {
-    spawnGuards(S, m.objective.count, 1000, 1000);
+export function currentStep(ms) {
+  const m = currentMission(ms);
+  return m ? m.steps[ms.step] : null;
+}
+
+function makeBeacon(scene) {
+  const group = new THREE.Group();
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(3, 0.35, 8, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffd94d }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.4;
+  group.add(ring);
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.6, 2.4, 60, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd94d, transparent: true, opacity: 0.28,
+      side: THREE.DoubleSide, depthWrite: false,
+    }),
+  );
+  beam.position.y = 30;
+  group.add(beam);
+  const light = new THREE.PointLight(0xffd94d, 40, 40, 1.6);
+  light.position.y = 4;
+  group.add(light);
+  scene.add(group);
+  return { group, light };
+}
+
+function placeBeacon(scene, ms, x, z) {
+  removeBeacon(scene, ms);
+  const b = makeBeacon(scene);
+  b.group.position.set(x, 0, z);
+  ms.beacon = b.group;
+  ms.beaconLight = b.light;
+}
+
+export function removeBeacon(scene, ms) {
+  if (ms.beacon) {
+    scene.remove(ms.beacon);
+    ms.beacon = null;
+    ms.beaconLight = null;
   }
 }
 
-export function updateMissions(S, dt) {
-  const m = currentMission(S);
-  if (!m) return;
-  const p = S.player;
-  const obj = m.objective;
-  if (obj.type === 'goto') {
-    if (Math.hypot(p.x - obj.x, p.y - obj.y) < 70) completeMission(S);
-  } else if (obj.type === 'deliver') {
-    if (p.inCar && Math.hypot(p.x - obj.x, p.y - obj.y) < 80) completeMission(S);
-  } else if (obj.type === 'eliminate') {
-    if (S.missionKills >= obj.count) {
-      if (Math.hypot(p.x - obj.x, p.y - obj.y) < 80) completeMission(S);
-    }
-  }
-  void dt;
+export function startMission(scene, ms, combat, police, index) {
+  ms.index = index;
+  ms.step = 0;
+  ms.active = true;
+  ms.holdTimer = 0;
+  ms.chaseTimer = 0;
+  ms.followTime = 0;
+  const m = currentMission(ms);
+  showMessage(ms, `${m.title} — ${m.giver}: ${m.brief}`);
+  enterStep(scene, ms, combat, police);
 }
 
-export function completeMission(S) {
-  const m = currentMission(S);
-  if (!m) return;
-  S.player.money += m.reward;
-  S.audio.missionDone();
-  S.message = `Misi selesai: ${m.title}! +$${m.reward}`;
-  S.msgT = 4;
-  S.missionIdx += 1;
-  if (S.missionIdx >= MISSIONS.length) {
-    S.state = 'done';
-    S.wanted = 0;
-    saveProgress(S);
+function enterStep(scene, ms, combat, police) {
+  const step = currentStep(ms);
+  if (!step) return;
+  if (step.type === 'goto' || step.type === 'race' || step.type === 'grab' || step.type === 'escape') {
+    placeBeacon(scene, ms, step.pos[0], step.pos[2]);
+  } else if (step.type === 'kill') {
+    placeBeacon(scene, ms, step.pos[0], step.pos[2]);
+    clearEnemies(scene, combat);
+    spawnEnemies(scene, combat, step.pos[0], step.pos[2], step.count, 100 + ms.index * 10);
+    ms.killsAtStart = combat.kills;
+  } else if (step.type === 'chase') {
+    if (ms.targetCar) scene.remove(ms.targetCar.mesh);
+    ms.targetCar = spawnTargetCar(scene, -100, -100);
+    ms.chaseTimer = 0;
+  }
+  if (step.wanted) raiseWanted(police, step.wanted);
+}
+
+export function showMessage(ms, text) {
+  ms.message = text;
+  ms.messageTimer = 7;
+}
+
+function advanceStep(scene, ms, combat, police, player) {
+  ms.step += 1;
+  const m = currentMission(ms);
+  if (ms.step >= m.steps.length) {
+    completeMission(scene, ms, combat, player);
     return;
   }
-  startMission(S, S.missionIdx);
+  enterStep(scene, ms, combat, police);
 }
 
-export function missionProgressText(S) {
-  const m = currentMission(S);
-  if (!m) return 'Semua misi selesai! Solara milikmu, Raka.';
-  const obj = m.objective;
-  if (obj.type === 'eliminate') {
-    return `${m.title}: lumpuhkan penjaga ${S.missionKills}/${obj.count}, lalu ke ${obj.label}`;
+function completeMission(scene, ms, combat, player) {
+  const m = currentMission(ms);
+  player.money += m.reward;
+  removeBeacon(scene, ms);
+  clearEnemies(scene, combat);
+  if (ms.targetCar) {
+    scene.remove(ms.targetCar.mesh);
+    ms.targetCar = null;
   }
-  if (obj.type === 'deliver') {
-    return S.player.inCar
-      ? `${m.title}: antar mobil ke ${obj.label}`
-      : `${m.title}: curi mobil dulu (E), lalu antar ke ${obj.label}`;
-  }
-  return `${m.title}: pergi ke ${obj.label}`;
+  ms.active = false;
+  showMessage(ms, `Misi selesai: ${m.title}! +$${m.reward}`);
+  ms.justCompleted = m;
+  ms.index += 1;
+  if (ms.index >= MISSIONS.length) ms.done = true;
 }
 
-export function saveProgress(S) {
-  try {
-    localStorage.setItem(CFG.SAVE_KEY, JSON.stringify({
-      missionIdx: S.missionIdx,
-      money: S.player.money,
-      hp: S.player.hp,
-      x: S.player.x,
-      y: S.player.y,
-      savedAt: Date.now(),
-    }));
-  } catch {
-    // Storage unavailable (private mode): progress simply is not saved.
+// Per-frame mission logic. Returns 'complete' on the frame a mission ends.
+export function updateMissions(scene, ms, combat, police, player, dt, G) {
+  if (ms.messageTimer > 0) ms.messageTimer -= dt;
+  if (ms.beacon) {
+    ms.beacon.rotation.y += dt * 0.8;
+    const s = 1 + Math.sin(performance.now() * 0.005) * 0.12;
+    ms.beacon.scale.set(s, 1, s);
   }
+  if (!ms.active) return null;
+  const step = currentStep(ms);
+  if (!step) return null;
+  const px = player.pos.x;
+  const pz = player.pos.z;
+  const distTo = (x, z) => Math.sqrt((px - x) * (px - x) + (pz - z) * (pz - z));
+
+  if (step.type === 'goto' || step.type === 'race') {
+    if (distTo(step.pos[0], step.pos[2]) < step.radius) {
+      advanceStep(scene, ms, combat, police, player);
+      return ms.justCompleted ? 'complete' : 'step';
+    }
+  } else if (step.type === 'chase') {
+    if (!ms.targetCar) return null;
+    const t = ms.targetCar.mesh.position;
+    const d = Math.sqrt((px - t.x) * (px - t.x) + (pz - t.z) * (pz - t.z));
+    if (d < step.radius) ms.followTime += dt;
+    else ms.followTime = Math.max(0, ms.followTime - dt * 0.5);
+    ms.chaseTimer += dt;
+    if (ms.followTime > 8) {
+      advanceStep(scene, ms, combat, police, player);
+      return 'step';
+    }
+    if (d > step.loseRadius && ms.chaseTimer > 10) {
+      failMission(scene, ms, combat, 'Kehilangan jejak sedan hitam itu.');
+      return 'fail';
+    }
+  } else if (step.type === 'kill') {
+    const killed = combat.kills - ms.killsAtStart;
+    step.label = step.label.replace(/\(\d+\/\d+\)/, `(${killed}/${step.count})`);
+    if (aliveEnemies(combat) === 0 && killed >= step.count) {
+      advanceStep(scene, ms, combat, police, player);
+      return ms.justCompleted ? 'complete' : 'step';
+    }
+  } else if (step.type === 'grab') {
+    if (distTo(step.pos[0], step.pos[2]) < step.radius) {
+      ms.holdTimer += dt;
+      if (ms.holdTimer >= (step.holdSeconds || 3)) {
+        advanceStep(scene, ms, combat, police, player);
+        return ms.justCompleted ? 'complete' : 'step';
+      }
+    } else {
+      ms.holdTimer = 0;
+    }
+  } else if (step.type === 'escape') {
+    if (distTo(step.pos[0], step.pos[2]) < step.radius && police.wanted === 0) {
+      advanceStep(scene, ms, combat, police, player);
+      return ms.justCompleted ? 'complete' : 'step';
+    }
+  }
+  return null;
 }
 
-export function loadProgress() {
-  try {
-    const raw = localStorage.getItem(CFG.SAVE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
+export function failMission(scene, ms, combat, reason) {
+  removeBeacon(scene, ms);
+  clearEnemies(scene, combat);
+  if (ms.targetCar) {
+    scene.remove(ms.targetCar.mesh);
+    ms.targetCar = null;
   }
+  ms.active = false;
+  showMessage(ms, `Misi gagal: ${reason} Bicara lagi dengan Raka untuk mengulang.`);
+  ms.justFailed = reason;
 }
 
-export function clearSave() {
-  try {
-    localStorage.removeItem(CFG.SAVE_KEY);
-  } catch {
-    // Nothing to clear.
-  }
+// Text for the HUD objective line and the mission list on the start screen.
+export function missionObjectiveText(ms) {
+  if (ms.done) return 'Semua misi selesai! Kamu legenda Kota Aruna.';
+  const m = currentMission(ms);
+  if (!m) return '';
+  if (!ms.active) return `Misi berikutnya: ${m.title} — tekan M untuk mulai`;
+  const step = currentStep(ms);
+  return step ? `${m.title}: ${step.label}` : m.title;
+}
+
+export function missionListText() {
+  return MISSIONS.map((m) => `${m.id}. ${m.title} — ${m.giver} ($${m.reward})`).join('\n');
+}
+
+// Restart the current mission from its first step.
+export function retryMission(scene, ms, combat, police) {
+  startMission(scene, ms, combat, police, ms.index);
 }

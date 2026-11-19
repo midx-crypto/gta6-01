@@ -1,112 +1,139 @@
-// Solara Nights — player.js
-// Raka on foot: movement, health, money, ammo and the steal/enter-car action.
+// Aruna Bay — the player: Dimas on foot (WASD, mouse orbit camera) and in a
+// car (E to enter/exit, steal parked and traffic cars). Health, money, ammo.
 
-import { CFG } from './config.js';
-import { collideBuildings, clampToWorld } from './world.js';
-import { isDown, wasPressed } from './input.js';
+import * as THREE from 'three';
+import { CONFIG } from './config.js';
+import { makeRng } from './random.js';
+import { hitsCollider } from './world.js';
+import { makePersonMesh } from './pedestrians.js';
+import { nearestCar } from './vehicles.js';
 
-export function createPlayer(x, y) {
+export function createPlayer(scene, spawn) {
+  const mesh = makePersonMesh(makeRng(42));
+  // Dimas: red jacket so he is easy to spot in screenshots
+  mesh.children[0].material.color.set(0xc22e2e);
+  mesh.children[4].material.color.set(0xc22e2e);
+  mesh.children[5].material.color.set(0xc22e2e);
+  mesh.position.copy(spawn);
+  scene.add(mesh);
   return {
-    x, y,
-    angle: -Math.PI / 2,
-    hp: CFG.PLAYER_HP,
-    money: 0,
-    ammo: CFG.PISTOL_MAG,
-    reserveAmmo: 48,
-    inCar: null,
-    speed: 0,
+    mesh,
+    pos: mesh.position,
+    yaw: 0,
+    camYaw: 0,
+    camPitch: 0.32,
+    health: CONFIG.startHealth,
+    money: CONFIG.startMoney,
+    ammo: CONFIG.pistolAmmo,
+    hasGun: true,
+    inCar: false,
+    car: null,
     walkPhase: 0,
+    speed: 0,
+    moving: false,
   };
 }
 
-export function updatePlayerOnFoot(S, dt) {
-  const p = S.player;
-  const input = S.input;
+// On-foot movement, camera-relative. Returns nothing; mutates player.
+export function updatePlayerOnFoot(player, input, dt, colliders) {
+  const run = input.keys['shift'] ? CONFIG.playerRunSpeed : CONFIG.playerWalkSpeed;
   let mx = 0;
-  let my = 0;
-  if (isDown(input, 'w', 'arrowup')) my -= 1;
-  if (isDown(input, 's', 'arrowdown')) my += 1;
-  if (isDown(input, 'a', 'arrowleft')) mx -= 1;
-  if (isDown(input, 'd', 'arrowright')) mx += 1;
-  const len = Math.hypot(mx, my);
-  if (len > 0) {
-    mx /= len;
-    my /= len;
-    p.x += mx * CFG.PLAYER_SPEED * dt;
-    p.y += my * CFG.PLAYER_SPEED * dt;
-    p.angle = Math.atan2(my, mx);
-    p.walkPhase += dt * 10;
-    p.speed = CFG.PLAYER_SPEED;
-  } else {
-    p.speed = 0;
+  let mz = 0;
+  if (input.keys['w']) mz += 1;
+  if (input.keys['s']) mz -= 1;
+  if (input.keys['a']) mx -= 1;
+  if (input.keys['d']) mx += 1;
+  const len = Math.sqrt(mx * mx + mz * mz);
+  player.moving = len > 0;
+  if (!player.moving) {
+    player.speed = 0;
+    return;
   }
-  collideBuildings(S.world, p, 14);
-  clampToWorld(p, 20);
-
-  // Aim with the mouse (screen space -> world space).
-  const wx = S.cam.x + input.mouseX;
-  const wy = S.cam.y + input.mouseY;
-  p.aimAngle = Math.atan2(wy - p.y, wx - p.x);
-
-  // E: steal / enter the nearest car.
-  if (wasPressed(input, 'e')) {
-    const car = nearestCar(S, p.x, p.y, 70);
-    if (car) stealCar(S, car);
-  }
-  // F also exits/enters for convenience.
-  if (wasPressed(input, 'f') && p.inCar) exitCar(S);
+  mx /= len;
+  mz /= len;
+  // camera-relative: forward is where the camera looks
+  const cy = player.camYaw;
+  const fx = Math.sin(cy);
+  const fz = Math.cos(cy);
+  const rx = Math.cos(cy);
+  const rz = -Math.sin(cy);
+  const wx = fx * mz + rx * mx;
+  const wz = fz * mz + rz * mx;
+  player.speed = run;
+  const nx = player.pos.x + wx * run * dt;
+  const nz = player.pos.z + wz * run * dt;
+  if (!hitsCollider(colliders, nx, player.pos.z, 0.7)) player.pos.x = nx;
+  if (!hitsCollider(colliders, player.pos.x, nz, 0.7)) player.pos.z = nz;
+  player.yaw = Math.atan2(wx, wz);
+  player.mesh.rotation.y = player.yaw;
+  player.walkPhase += dt * run * 1.6;
+  const swing = Math.sin(player.walkPhase) * 0.55;
+  player.mesh.userData.legL.rotation.x = swing;
+  player.mesh.userData.legR.rotation.x = -swing;
+  player.mesh.userData.armL.rotation.x = -swing * 0.8;
+  player.mesh.userData.armR.rotation.x = swing * 0.8;
 }
 
-export function nearestCar(S, x, y, maxDist) {
-  let best = null;
-  let bestD = maxDist;
-  for (const car of S.cars) {
-    if (car.dead) continue;
-    const d = Math.hypot(car.x - x, car.y - y);
-    if (d < bestD) {
-      bestD = d;
-      best = car;
-    }
+// Try to enter the nearest car (E). Returns the car or null.
+// Note: does not clear car.parked — the caller checks it first to tell a
+// stolen parked car from a carjacked traffic car, then clears it.
+export function tryEnterCar(player, cars) {
+  const car = nearestCar(cars, player.pos.x, player.pos.z, 5);
+  if (!car) return null;
+  player.inCar = true;
+  player.car = car;
+  car.isPlayerCar = true;
+  player.mesh.visible = false;
+  return car;
+}
+
+export function exitCar(player) {
+  if (!player.car) return;
+  const car = player.car;
+  player.inCar = false;
+  player.car = null;
+  car.isPlayerCar = false;
+  // step out to the driver's side
+  player.pos.set(
+    car.mesh.position.x - Math.cos(car.yaw) * 2.2,
+    0,
+    car.mesh.position.z + Math.sin(car.yaw) * 2.2,
+  );
+  player.mesh.visible = true;
+  player.mesh.position.copy(player.pos);
+}
+
+export function damagePlayer(player, amount) {
+  player.health = Math.max(0, player.health - amount);
+  return player.health <= 0;
+}
+
+export function healPlayer(player, amount) {
+  player.health = Math.min(CONFIG.startHealth, player.health + amount);
+}
+
+// Save / load progress in localStorage.
+export function saveGame(player, missionIndex) {
+  try {
+    localStorage.setItem(CONFIG.saveKey, JSON.stringify({
+      money: player.money,
+      health: player.health,
+      ammo: player.ammo,
+      mission: missionIndex,
+      x: player.pos.x,
+      z: player.pos.z,
+    }));
+    return true;
+  } catch {
+    return false;
   }
-  return best;
 }
 
-export function stealCar(S, car) {
-  const p = S.player;
-  if (car.kind === 'police') {
-    S.wanted = Math.min(CFG.WANTED_MAX, S.wanted + 1);
-    S.message = 'Mencuri mobil polisi! Wanted naik!';
-    S.msgT = 3;
-  } else if (car.kind === 'traffic') {
-    S.wanted = Math.min(CFG.WANTED_MAX, S.wanted + 1);
-    S.message = 'Mobil dicuri! Warga melapor ke polisi.';
-    S.msgT = 3;
-    S.audio.pickup();
+export function loadGame() {
+  try {
+    const raw = localStorage.getItem(CONFIG.saveKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
   }
-  car.kind = 'player';
-  car.driver = 'player';
-  p.inCar = car;
-  p.x = car.x;
-  p.y = car.y;
-}
-
-export function exitCar(S) {
-  const p = S.player;
-  const car = p.inCar;
-  if (!car) return;
-  p.inCar = null;
-  car.driver = 'parked';
-  // Step out to the side of the car.
-  p.x = car.x + Math.cos(car.angle + Math.PI / 2) * 34;
-  p.y = car.y + Math.sin(car.angle + Math.PI / 2) * 34;
-  car.speed = 0;
-  collideBuildings(S.world, p, 14);
-}
-
-// Mission cash: adds money and flashes a short message.
-export function giveCash(S, amount, reason) {
-  S.player.money += amount;
-  S.message = `+$${amount} — ${reason}`;
-  S.msgT = 2.5;
-  S.audio.pickup();
 }

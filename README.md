@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/gta6-01/midx-crypto/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/midx-crypto/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-Original open-world crime game in the sun-soaked coastal city of Solara: explore on foot and by car, steal cars, take story missions, and evade the police as your wanted level rises.
+Aruna Bay is an original 3D open-world crime game in the sun-soaked coastal city of Kota Aruna: explore on foot and by car, steal cars, outrun the police as your wanted level rises, and run seven story missions as Dimas, fixer of Aruna. Built with Three.js WebGL, fully offline, no network requests at runtime.
 
 ## Run it
 
@@ -17,17 +17,16 @@ Then open http://localhost:8080.
 ## Controls
 
 - **WASD / arrows** — walk or drive
-- **E** — steal / enter a car, or get out
-- **Mouse + click** — aim and shoot, **R** reloads
-- **P / Esc** — pause, **S** save, **M** mute
+- **Mouse drag** — orbit camera, **wheel** — zoom
+- **E** — enter / steal a car, or get out
+- **Click** — shoot the pistol
+- **M** — start the next story mission
+- **P / Esc** — pause (progress saves automatically)
+- **Shift** — run, **Space** — handbrake
 
 ## Story
 
-Raka returns to Kota Solara owing money to the wrong people. Sari and Bayu
-give him three jobs: meet at the south pier, deliver a stolen car to the
-garage, and settle the last bill with the warehouse guards — while the Solara
-police raise his wanted level from 0 to 5.
+Dimas, driver and fixer of Kota Aruna, answers a call from Raka, the old fixer at Bengkel Raka. Seven jobs follow: a hot delivery for Sari, a warehouse shootout at the harbour, three timed drops across the city, a police raid to escape, a beach street race against Bimo, and one last job — the Bank Aruna heist, ending in a getaway to the pier.
 
 ---
-
 <sub>Entered on [make.fun](https://make.fun/?ref=g5h40b4t&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>

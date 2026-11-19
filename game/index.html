@@ -1,21 +1,128 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="id">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Solara Nights — an original open-world crime game in the coastal city of Kota Solara. Explore on foot and by car, steal cars, take missions and evade the police.">
+<meta name="description" content="Aruna Bay: an original 3D open-world crime game in the fictional coastal city of Kota Aruna. Drive, steal cars, dodge the police, run seven story missions.">
 <link rel="icon" href="data:,">
-<title>Solara Nights — Open-World Crime in Kota Solara</title>
+<title>Aruna Bay — Open World Kota Aruna</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1426; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
-  /* Read aloud, never shown: the status line screen readers announce. */
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1420;
+    font-family: Arial, Helvetica, sans-serif; color: #fff; }
+  #game, #game canvas { width: 100%; height: 100%; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  .panel { background: rgba(10, 8, 18, 0.55); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 8px; padding: 8px 12px; backdrop-filter: blur(2px); }
+  /* minimap bottom-left */
+  #minimap-wrap { position: absolute; left: 16px; bottom: 16px; }
+  #minimap { width: 200px; height: 200px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.75);
+    background: #222; display: block; }
+  #health-wrap { position: absolute; left: 16px; bottom: 226px; width: 200px; }
+  #health-bar { height: 12px; background: rgba(0,0,0,0.6); border-radius: 6px; overflow: hidden; }
+  #health-fill { height: 100%; width: 100%; background: #4ad87a; }
+  #health-text { font-size: 13px; font-weight: bold; margin-top: 2px; text-shadow: 0 1px 2px #000; }
+  /* money + stars top-right */
+  #stats { position: absolute; right: 16px; top: 16px; text-align: right; }
+  #money { font-size: 28px; font-weight: bold; color: #7cff5e; text-shadow: 0 2px 3px #000; }
+  #stars { font-size: 26px; letter-spacing: 4px; text-shadow: 0 2px 3px #000; }
+  #ammo { font-size: 16px; margin-top: 4px; text-shadow: 0 1px 2px #000; }
+  /* objective top-centre */
+  #objective-wrap { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    text-align: center; max-width: 560px; }
+  #objective-title { font-size: 17px; font-weight: bold; text-shadow: 0 2px 3px #000; }
+  #objective { font-size: 14px; color: #ffd94d; text-shadow: 0 1px 2px #000; margin-top: 2px; }
+  #message { display: none; margin-top: 8px; font-size: 14px; line-height: 1.4;
+    background: rgba(10,8,18,0.7); border: 1px solid #ffd94d; border-radius: 8px; padding: 8px 12px; }
+  /* speed bottom-right */
+  #speed { position: absolute; right: 20px; bottom: 20px; font-size: 30px; font-weight: bold;
+    text-shadow: 0 2px 4px #000; }
+  #hint { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: none; font-size: 14px; background: rgba(10,8,18,0.65); padding: 8px 14px;
+    border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); white-space: nowrap; }
+  /* crosshair */
+  #crosshair { display: none; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px;
+    transform: translate(-50%, -50%); }
+  #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #fff;
+    box-shadow: 0 0 3px #000; }
+  #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
+  #crosshair::after { left: 0; top: 10px; width: 22px; height: 2px; }
+  /* full-screen menus */
+  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; text-align: center; z-index: 10; pointer-events: auto;
+    background: linear-gradient(180deg, rgba(20,10,40,0.55), rgba(10,5,20,0.82)); }
+  .screen h1 { font-size: 64px; letter-spacing: 4px; color: #ffd94d;
+    text-shadow: 0 0 24px rgba(255,120,80,0.8), 0 4px 0 #7a2a00; }
+  .screen h2 { font-size: 20px; color: #ff8f5e; letter-spacing: 2px; margin-top: 4px; }
+  .screen p { max-width: 620px; font-size: 16px; line-height: 1.55; margin: 18px 20px 8px; }
+  .screen .missions { font-size: 14px; line-height: 1.7; color: #ffe9b0; margin: 10px 0 4px; }
+  .screen .controls { font-size: 13px; color: #cfc8e0; margin-top: 12px; line-height: 1.7; }
+  .btn { pointer-events: auto; cursor: pointer; margin-top: 22px; padding: 14px 42px;
+    font-size: 20px; font-weight: bold; letter-spacing: 2px; color: #1a1000;
+    background: linear-gradient(180deg, #ffe14d, #ff9a3d); border: none; border-radius: 10px;
+    box-shadow: 0 4px 0 #a35a00, 0 6px 18px rgba(0,0,0,0.5); }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.secondary { background: linear-gradient(180deg, #9fd8ff, #4a7ad8); color: #06101f;
+    box-shadow: 0 4px 0 #24406a, 0 6px 18px rgba(0,0,0,0.5); font-size: 16px; padding: 10px 28px; }
+  #end-title { font-size: 52px; }
+  .badge { font-size: 13px; color: #9fd8ff; margin-top: 16px; letter-spacing: 1px; }
 </style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
 </head>
 <body>
-<canvas id="game" aria-label="Solara Nights: explore Kota Solara on foot and by car, steal cars, take missions and evade the police"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
+<div id="game"></div>
+<div id="hud">
+  <div id="minimap-wrap"><canvas id="minimap" width="200" height="200"></canvas></div>
+  <div id="health-wrap">
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="health-text">❤ 100</div>
+  </div>
+  <div id="stats" class="panel">
+    <div id="money">$250</div>
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="ammo">🔫 120</div>
+  </div>
+  <div id="objective-wrap">
+    <div id="objective-title">Tekan M untuk mulai misi</div>
+    <div id="objective"></div>
+    <div id="message"></div>
+  </div>
+  <div id="speed"></div>
+  <div id="hint"></div>
+  <div id="crosshair"></div>
+</div>
+
+<div id="start-screen" class="screen" style="display:flex">
+  <h1>ARUNA BAY</h1>
+  <h2>KOTA ARUNA &bull; OPEN WORLD &bull; SENJA PANAS</h2>
+  <p>Kamu <b>Dimas</b>, sopir dan fixer jalanan Kota Aruna. Raka memanggilmu:
+  tujuh misi menanti, dari titipan panas sampai perampokan Bank Aruna.
+  Jelajahi kota di tepi laut, curi mobil, kabur dari polisi Kapten Laras,
+  dan jadilah legenda Aruna.</p>
+  <div class="missions">1. Pesan dari Raka &bull; 2. Titipan Panas &bull; 3. Gudang Pelabuhan<br>
+  4. Antar Paket &bull; 5. Kabur dari Razia &bull; 6. Balap Pantai &bull; 7. Perampokan Bank Aruna</div>
+  <button id="start-btn" class="btn">▶ MULAI BERMAIN</button>
+  <div class="controls">WASD jalan / nyetir &bull; Mouse putar kamera &bull; E masuk / keluar mobil<br>
+  Klik kiri tembak &bull; M mulai misi &bull; P jeda &bull; Shift lari &bull; Spasi rem tangan</div>
+  <div class="badge">Game orisinal buatan AI agent untuk make.fun &bull; Kota Aruna, Dimas, Raka &amp; Sari adalah tokoh fiksi</div>
+</div>
+
+<div id="pause-screen" class="screen">
+  <h1 id="pause-title" style="font-size:44px">JEDA</h1>
+  <p>Istirahat sebentar. Progresmu tersimpan otomatis.<br>
+  Uang, misi dan kesehatanmu aman di sini.</p>
+  <button id="resume-btn" class="btn">▶ LANJUTKAN</button>
+  <button id="mission-btn" class="btn secondary">MULAI MISI BERIKUTNYA (M)</button>
+</div>
+
+<div id="end-screen" class="screen">
+  <h1 id="end-title">MISI SELESAI</h1>
+  <p id="end-text"></p>
+  <button id="restart-btn" class="btn">▶ KEMBALI KE JALANAN (R)</button>
+</div>
+
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

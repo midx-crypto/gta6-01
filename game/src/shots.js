@@ -1,84 +1,102 @@
-// Solara Nights — shots.js
-// Deterministic screenshot modes: ?shot=start|play|chase|end&seed=1 puts the
-// game in a fixed, photogenic state so every screenshot is reproducible.
+// Aruna Bay — deterministic screenshot modes. ?shot=start|play|chase|mission|end
+// &seed=1 puts the game in a fixed, reproducible state so the screenshots the
+// maker takes are real renders of the game, not staged images.
 
-import { CFG } from './config.js';
-import { makeCar } from './vehicles.js';
-import { makePed } from './pedestrians.js';
-import { startMission } from './missions.js';
+import { syncPoliceUnits } from './police.js';
 
-export function applyShotMode(S, shot) {
-  if (!shot) return;
+export function parseShotMode() {
+  const params = new URLSearchParams(window.location.search);
+  const shot = params.get('shot');
+  const seed = Number(params.get('seed') || '1');
+  if (!shot) return null;
+  return { shot, seed: Number.isFinite(seed) ? seed : 1 };
+}
+
+// Apply a shot mode to a freshly built game. Called once after init, before
+// the first rendered frame that matters.
+export function applyShotMode(G, mode) {
+  const { shot } = mode;
   if (shot === 'start') {
-    S.state = 'title';
+    // start screen over a slow cinematic orbit of the city
+    G.mode = 'menu';
+    G.cinematic = true;
     return;
   }
+  // every other mode starts playing immediately, with a fixed camera
+  G.mode = 'playing';
+  G.shotMode = true;
+  G.hud.startScreen.style.display = 'none';
   if (shot === 'play') {
-    S.state = 'play';
-    // Raka on foot at a busy intersection, first mission live.
-    S.player.x = 1000;
-    S.player.y = 1000;
-    S.player.angle = -Math.PI / 2;
-    startMission(S, 0);
-    S.message = 'Misi 1: Kenalan di Dermaga — sampai ke penanda kuning.';
-    S.msgT = 6;
-    return;
-  }
-  if (shot === 'chase') {
-    S.state = 'play';
-    // Raka in a red car on the main avenue, wanted level 3, police closing in.
-    const car = makeCar(1400, 1000, 0, '#d94f3d', 'player');
-    car.driver = 'player';
-    car.speed = 380;
-    S.cars.push(car);
-    S.player.inCar = car;
-    S.player.x = car.x;
-    S.player.y = car.y;
-    S.wanted = 3;
-    startMission(S, 1);
-    S.message = 'Misi 2: Mobil Pesanan — antar mobil curian ke Bengkel Bayu!';
-    S.msgT = 6;
-    // Two police cars in pursuit, one ahead cutting across.
-    const p1 = makeCar(1180, 1000, 0, '#1c2f4a', 'police');
-    p1.driver = 'police';
-    p1.speed = 480;
-    S.cars.push(p1);
-    const p2 = makeCar(1560, 940, Math.PI, '#1c2f4a', 'police');
-    p2.driver = 'police';
-    p2.speed = 460;
-    S.cars.push(p2);
-    const p3 = makeCar(1400, 1180, -Math.PI / 2, '#1c2f4a', 'police');
-    p3.driver = 'police';
-    p3.speed = 440;
-    S.cars.push(p3);
-    return;
-  }
-  if (shot === 'mission') {
-    S.state = 'play';
-    // Raka on foot at the warehouse yard, mission 3 live, guards closing in.
-    S.player.x = 1000;
-    S.player.y = 860;
-    S.player.angle = 0;
-    S.wanted = 2;
-    startMission(S, 2);
-    S.message = 'Misi 3: Tagihan Terakhir — lumpuhkan 3 penjaga gudang!';
-    S.msgT = 6;
-    return;
-  }
-  if (shot === 'end') {
-    S.state = 'done';
-    S.player.money = 1300;
-    S.missionIdx = 3;
-    return;
+    // driving up the neon strip: Kafe Senja sign ahead, traffic on the road
+    const car = G.cars.find((c) => c.parked);
+    if (car) {
+      G.player.inCar = true;
+      G.player.car = car;
+      car.parked = false;
+      car.isPlayerCar = true;
+      car.mesh.position.set(-100, 0, 30);
+      car.yaw = 0;
+      car.speed = 18;
+      G.player.mesh.visible = false;
+      G.player.pos.copy(car.mesh.position);
+      G.cam.yaw = 0;
+      G.cam.pitch = 0.28;
+      G.cam.targetDistance = 12;
+    }
+  } else if (shot === 'chase') {
+    // driving down the beach road with 3 wanted stars; the camera looks back
+    // from ahead so the police tail is in frame behind the player car
+    const car = G.cars.find((c) => c.parked);
+    if (car) {
+      G.player.inCar = true;
+      G.player.car = car;
+      car.parked = false;
+      car.isPlayerCar = true;
+      car.mesh.position.set(186, 0, 40);
+      car.yaw = Math.PI;
+      car.speed = 24;
+      G.player.mesh.visible = false;
+      G.player.pos.copy(car.mesh.position);
+      G.cam.yaw = 0.6;
+      G.cam.pitch = 0.3;
+      G.cam.targetDistance = 11;
+    }
+    G.police.wanted = 3;
+    G.police.heatTimer = 0;
+    syncPoliceUnits(G.scene, G.police, G.player.pos);
+    // park the police tail right behind the player so it reads in the shot
+    const tailSpots = [[186, 56], [178, 62], [192, 64]];
+    G.police.cars.forEach((pc, i) => {
+      const s = tailSpots[i % tailSpots.length];
+      pc.mesh.position.set(s[0], 0, s[1]);
+      pc.yaw = Math.PI;
+      pc.speed = 26;
+    });
+    startMissionQuiet(G);
+  } else if (shot === 'mission') {
+    // mission 3 shootout at the warehouse: enemies ahead on the road
+    G.player.pos.set(136, 0, 108);
+    G.player.mesh.position.copy(G.player.pos);
+    G.cam.yaw = 0.7;
+    G.cam.pitch = 0.2;
+    G.missions.index = 2;
+    G.startMission(2);
+  } else if (shot === 'end') {
+    // mission-complete screen over the pier at dusk
+    G.player.pos.set(200, 0, -25);
+    G.player.mesh.position.copy(G.player.pos);
+    G.cam.yaw = -Math.PI / 2;
+    G.mode = 'complete';
+    G.hud.endTitle.textContent = 'MISI SELESAI';
+    G.hud.endText.textContent = 'Perampokan Bank Aruna berhasil! +$5.000 — Dimas kini legenda Kota Aruna.';
+    G.hud.endScreen.style.display = 'flex';
   }
 }
 
-// A small crowd of pedestrians near a point, for lively screenshots.
-export function seedCrowd(S, cx, cy, n) {
-  for (let i = 0; i < n; i++) {
-    const ped = makePed(S, false);
-    ped.x = cx + S.rng.range(-260, 260);
-    ped.y = cy + S.rng.range(-200, 200);
-    S.peds.push(ped);
-  }
+// The chase cover shot also wants an objective on screen, so start mission 1
+// without the big intro message.
+function startMissionQuiet(G) {
+  G.missions.index = 0;
+  G.startMission(0);
+  G.missions.messageTimer = 0;
 }
